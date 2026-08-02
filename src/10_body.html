@@ -1,0 +1,75 @@
+<div class="app">
+
+  <aside class="instrument">
+    <div class="ident">
+      <h1>Human <span class="x">&times;</span> Time</h1>
+      <p><span class="count" id="hdr-count">0</span> dated, located events from Wikidata.
+         Along the bottom, when. Up the right-hand edge, how much of the world remembers it.</p>
+    </div>
+
+    <div class="group">
+      <span class="lbl" id="lbl-themes">What kind</span>
+      <div class="themes" role="group" aria-labelledby="lbl-themes" id="themes"></div>
+    </div>
+
+    <div class="group">
+      <span class="lbl" for="lens">Whose record</span>
+      <select class="lens" id="lens" aria-label="Filter by which Wikipedia edition covers the event"></select>
+      <p class="hint" id="lens-hint"></p>
+    </div>
+
+    <div class="detail" id="detail" tabindex="-1" aria-live="polite"></div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <canvas id="globe" tabindex="0" role="application"
+            aria-label="Globe of dated human events. Arrow keys rotate, plus and minus zoom, Escape clears the selection."></canvas>
+
+    <div class="stage-tl">
+      <div class="headline">Remembered in <b id="hd-cov">1</b>+ languages &middot;
+        showing <b id="hd-n">0</b></div>
+      <p class="sub" id="hd-sub"></p>
+    </div>
+
+    <div class="stage-tr">
+      <button class="iconbtn" id="btn-cluster" aria-pressed="true">Cluster</button>
+      <button class="iconbtn" id="btn-basemap" aria-pressed="true">Satellite</button>
+      <button class="iconbtn" id="btn-plates" aria-pressed="false">Plates</button>
+      <button class="iconbtn" id="btn-theme">Theme</button>
+    </div>
+
+    <div class="tip" id="tip" role="status"></div>
+  </main>
+
+  <aside class="rail">
+    <div class="rail-head">
+      <span class="lbl">Remembered in</span>
+      <div class="rail-n" id="rail-n">1+</div>
+      <div class="rail-sub">language editions</div>
+    </div>
+    <canvas id="railcv" tabindex="0" role="slider"
+            aria-label="Coverage floor: minimum number of Wikipedia language editions"
+            aria-valuemin="1" aria-valuemax="300" aria-valuenow="1"></canvas>
+    <div class="rail-foot">
+      <button class="iconbtn" id="btn-allcov">Show all</button>
+    </div>
+  </aside>
+
+  <section class="chron">
+    <div class="chron-bar">
+      <span class="rd">Showing <b id="rd-window">the last 3,200 years</b></span>
+      <span class="rd" id="rd-drop"></span>
+      <span class="presets" id="presets">
+        <button data-t0="0" data-t1="75000">All</button>
+        <button data-t0="0" data-t1="12000">Since farming</button>
+        <button data-t0="0" data-t1="3200">Since writing</button>
+        <button data-t0="0" data-t1="600">Since 1500</button>
+        <button data-t0="0" data-t1="130">Since 1900</button>
+      </span>
+    </div>
+    <canvas id="chroncv" tabindex="0" role="slider"
+            aria-label="Time axis. Drag to pan, scroll to zoom."
+            aria-valuemin="0" aria-valuemax="75000" aria-valuenow="3200"></canvas>
+  </section>
+
+</div>

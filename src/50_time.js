@@ -1,0 +1,134 @@
+/* ============================================================================
+   TIME AXIS + PERIOD RIBBON + EVENT DENSITY
+   The sibling site's signature was the stratigraphic ribbon in real ICS colours.
+   The equivalent here is a histogram of the record itself: how many events
+   survive, century by century. It shows the shape of what is remembered, which
+   is the honest thing this corpus is actually about.
+   ========================================================================== */
+
+const ccv = document.getElementById('chroncv');
+const cx2 = ccv.getContext('2d');
+
+const TICK_H = 17, HIST_H = 56, ERA_H = 15, CENT_H = 12;
+const CH_H = TICK_H + HIST_H + ERA_H + CENT_H + 4;
+let CW = 0, SCALE = null;
+
+function resizeChron() {
+  CW = Math.max(120, ccv.clientWidth || ccv.parentElement.getBoundingClientRect().width);
+  ccv.width = Math.round(CW * DPR); ccv.height = Math.round(CH_H * DPR);
+  ccv.style.height = CH_H + 'px';
+  cx2.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+function chronScale() { return makeScale(S.win.t0, S.win.t1, CW); }
+
+function tickValues(t0, t1) {
+  const out = [];
+  const p0 = Math.floor(Math.log10(Math.max(t0, 1))), p1 = Math.ceil(Math.log10(t1));
+  for (let p = p0; p <= p1; p++)
+    for (const m of [1, 2, 5]) {
+      const v = m * Math.pow(10, p);
+      if (v >= t0 && v <= t1) out.push(v);
+    }
+  if (t0 <= 0) out.push(0);
+  return out.sort((a, b) => b - a);
+}
+
+function drawBandLane(sc, rows, y, h, dark) {
+  for (const iv of rows) {
+    if (iv.e > S.win.t1 || iv.b < S.win.t0) continue;
+    const x0 = Math.max(-2, sc.x(Math.min(iv.b, S.win.t1)));
+    const x1 = Math.min(CW + 2, sc.x(Math.max(iv.e, S.win.t0)));
+    const w = x1 - x0;
+    if (w < 0.4) continue;
+    cx2.fillStyle = iv.c;
+    cx2.fillRect(x0, y, Math.max(w, 0.6), h - 1);
+    if (w > 5) {
+      cx2.strokeStyle = 'rgba(0,0,0,0.3)'; cx2.lineWidth = 0.5;
+      cx2.beginPath(); cx2.moveTo(x0 + .25, y); cx2.lineTo(x0 + .25, y + h - 1); cx2.stroke();
+    }
+    if (w > 26) {
+      cx2.font = `600 9px xt-cond, sans-serif`;
+      const tw = cx2.measureText(iv.n).width;
+      if (tw + 8 < w) {
+        cx2.fillStyle = dark ? 'rgba(236,230,220,0.85)' : 'rgba(14,12,10,0.82)';
+        cx2.fillText(iv.n, x0 + (w - tw) / 2, y + h - 4);
+      }
+    }
+  }
+}
+
+/* Histogram of surviving events per column — the shape of the record. */
+function drawHistogram(sc, yTop, h) {
+  const F = q();
+  const cols = Math.max(40, Math.floor(CW / 4));
+  const bins = new Float64Array(cols);
+  const binsTheme = THEMES.map(() => new Float64Array(cols));
+  for (const e of F.events) {
+    const x = sc.x(e.t);
+    if (x < 0 || x >= CW) continue;
+    const b = Math.min(cols - 1, Math.floor(x / CW * cols));
+    bins[b]++;
+    binsTheme[THEMES.indexOf(e.theme)][b]++;
+  }
+  let max = 0; for (const v of bins) max = Math.max(max, v);
+  if (max <= 0) {
+    cx2.fillStyle = CSSV['chalk-faint'];
+    cx2.font = '400 11px xt-sans, sans-serif';
+    cx2.fillText('nothing in this window at this coverage', 12, yTop + h / 2);
+    return;
+  }
+  const bw = CW / cols;
+  for (let b = 0; b < cols; b++) {
+    if (!bins[b]) continue;
+    let acc = 0;
+    for (let ti = 0; ti < THEMES.length; ti++) {
+      const v = binsTheme[ti][b];
+      if (!v) continue;
+      const hh = (v / max) * (h - 6);
+      cx2.fillStyle = withAlpha(CSSV[THEMES[ti]], 0.88);
+      cx2.fillRect(b * bw, yTop + h - 3 - acc - hh, Math.max(bw - 0.5, 0.8), hh);
+      acc += hh;
+    }
+  }
+  cx2.fillStyle = CSSV['chalk-faint'];
+  cx2.font = '400 9px xt-mono, monospace';
+  cx2.fillText(`${max} events at the peak`, 6, yTop + 10);
+}
+
+function drawChron() {
+  const sc = SCALE = chronScale();
+  cx2.clearRect(0, 0, CW, CH_H);
+
+  cx2.font = '400 9.5px xt-mono, monospace';
+  let lastX = -999;
+  for (const t of tickValues(S.win.t0, S.win.t1)) {
+    const x = sc.x(t);
+    if (x < 2 || x > CW - 2) continue;
+    cx2.strokeStyle = withAlpha(CSSV['chalk-faint'], 0.3);
+    cx2.beginPath(); cx2.moveTo(x, TICK_H - 5); cx2.lineTo(x, TICK_H); cx2.stroke();
+    const lab = fmtYbpLabel(t);
+    const w = cx2.measureText(lab).width;
+    if (x - w / 2 > lastX + 8 && x + w / 2 < CW - 2) {
+      cx2.fillStyle = CSSV['chalk-faint'];
+      cx2.fillText(lab, x - w / 2, TICK_H - 7);
+      lastX = x + w / 2;
+    }
+  }
+
+  drawHistogram(sc, TICK_H, HIST_H);
+
+  let y = TICK_H + HIST_H;
+  drawBandLane(sc, ERAS, y, ERA_H, false);
+  drawBandLane(sc, CENTURIES, y + ERA_H, CENT_H, true);
+
+  cx2.strokeStyle = CSSV.rule; cx2.lineWidth = 1;
+  cx2.beginPath(); cx2.moveTo(0, y + .5); cx2.lineTo(CW, y + .5); cx2.stroke();
+
+  if (S.selection && BY_Q[S.selection]) {
+    const x = sc.x(BY_Q[S.selection].t);
+    if (x >= -1 && x <= CW + 1) {
+      cx2.strokeStyle = CSSV.amber; cx2.lineWidth = 1;
+      cx2.beginPath(); cx2.moveTo(x + .5, 0); cx2.lineTo(x + .5, CH_H); cx2.stroke();
+    }
+  }
+}

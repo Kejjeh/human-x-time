@@ -1,0 +1,283 @@
+/* ============================================================================
+   WIRING
+   ========================================================================== */
+let needGlobe = true, needChron = true, needRail = true, needPanel = true;
+function markAll() { needGlobe = needChron = needRail = needPanel = true; }
+function changed() { invalidate(); markAll(); paintOnInput(); }
+
+function setCoverage(n) {
+  const v = Math.max(1, Math.min(MAX_SL, Math.round(n)));
+  if (v === S.kt) return;
+  S.kt = v; changed();
+}
+function setWindow(t0, t1) {
+  const span = Math.max(20, Math.min(T_MAX, t1 - t0));
+  let a = Math.max(0, t0), b = a + span;
+  if (b > T_MAX) { b = T_MAX; a = Math.max(0, b - span); }
+  S.win.t0 = a; S.win.t1 = b; changed();
+}
+function setSelection(qid) { S.selection = qid; changed(); }
+
+/* -------------------------------------------------------------------- globe */
+let gDrag = null, gMoved = 0;
+const gVel = [];
+gcv.addEventListener('pointerdown', e => {
+  gcv.setPointerCapture(e.pointerId);
+  gDrag = { x: e.clientX, y: e.clientY }; gMoved = 0; gVel.length = 0;
+  S.spin.lam = S.spin.phi = 0; gcv.classList.add('dragging');
+});
+gcv.addEventListener('pointermove', e => {
+  const rect = gcv.getBoundingClientRect();
+  if (gDrag) {
+    const dx = e.clientX - gDrag.x, dy = e.clientY - gDrag.y;
+    gMoved += Math.abs(dx) + Math.abs(dy);
+    const k = 180 / (GR * Math.PI) * 1.1;
+    S.rot.lam += dx * k;
+    S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + dy * k));
+    gVel.push({ dx, dy, t: performance.now() });
+    if (gVel.length > 5) gVel.shift();
+    gDrag = { x: e.clientX, y: e.clientY };
+    needGlobe = true; paintOnInput();
+    return;
+  }
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = null, bd = 1e9;
+  for (const h of HIT) {
+    const d = Math.hypot(h.x - mx, h.y - my);
+    if (d < h.r && d < bd) { bd = d; best = h; }
+  }
+  const id = best ? best.id : null;
+  if (id !== S.hover) { S.hover = id; needGlobe = true; paintOnInput(); }
+  const tip = document.getElementById('tip');
+  if (id && BY_Q[id]) {
+    const ev = BY_Q[id];
+    tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
+      best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
+    tip.style.left = best.x + 'px'; tip.style.top = best.y + 'px';
+    tip.classList.add('on'); gcv.style.cursor = 'pointer';
+  } else { tip.classList.remove('on'); gcv.style.cursor = ''; }
+});
+function endGlobeDrag(e) {
+  if (!gDrag) return;
+  gDrag = null; gcv.classList.remove('dragging');
+  if (!RM.matches && gVel.length) {
+    const now = performance.now();
+    const recent = gVel.filter(v => now - v.t < 90);
+    if (recent.length) {
+      const k = 180 / (GR * Math.PI) * 1.1;
+      S.spin.lam = recent.reduce((a, v) => a + v.dx, 0) / recent.length * k * 0.9;
+      S.spin.phi = recent.reduce((a, v) => a + v.dy, 0) / recent.length * k * 0.9;
+    }
+  }
+  if (gMoved < 5) {
+    const rect = gcv.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bd = 1e9;
+    for (const h of HIT) {
+      const d = Math.hypot(h.x - mx, h.y - my);
+      if (d < h.r && d < bd) { bd = d; best = h; }
+    }
+    setSelection(best ? best.id : null);
+  }
+}
+gcv.addEventListener('pointerup', endGlobeDrag);
+gcv.addEventListener('pointercancel', () => { gDrag = null; gcv.classList.remove('dragging'); });
+gcv.addEventListener('wheel', e => {
+  e.preventDefault();
+  ZOOMF = Math.max(0.45, Math.min(4.5, ZOOMF * (e.deltaY > 0 ? 0.92 : 1.087)));
+  resizeGlobe(); needGlobe = true; paintOnInput();
+}, { passive: false });
+gcv.addEventListener('keydown', e => {
+  const step = e.shiftKey ? 15 : 5;
+  if (e.key === 'ArrowLeft') S.rot.lam -= step;
+  else if (e.key === 'ArrowRight') S.rot.lam += step;
+  else if (e.key === 'ArrowUp') S.rot.phi = Math.min(89, S.rot.phi + step);
+  else if (e.key === 'ArrowDown') S.rot.phi = Math.max(-89, S.rot.phi - step);
+  else if (e.key === '+' || e.key === '=') { ZOOMF = Math.min(4.5, ZOOMF * 1.12); resizeGlobe(); }
+  else if (e.key === '-') { ZOOMF = Math.max(0.45, ZOOMF * 0.89); resizeGlobe(); }
+  else if (e.key === 'Escape') { setSelection(null); return e.preventDefault(); }
+  else return;
+  needGlobe = true; paintOnInput(); e.preventDefault();
+});
+
+/* -------------------------------------------------------------------- chron */
+let cDrag = null;
+const chronPos = e => { const r = ccv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+ccv.addEventListener('pointerdown', e => {
+  ccv.setPointerCapture(e.pointerId);
+  cDrag = { x: chronPos(e).x, t0: S.win.t0, t1: S.win.t1 };
+});
+ccv.addEventListener('pointermove', e => {
+  if (!cDrag) return;
+  const p = chronPos(e);
+  const k = Math.max((cDrag.t1 - cDrag.t0) / 46, 1e-9);
+  const u0 = Math.asinh(cDrag.t0 / k), u1 = Math.asinh(cDrag.t1 / k);
+  const shift = ((p.x - cDrag.x) / CW) * (u1 - u0);
+  let a = k * Math.sinh(u0 + shift), b = k * Math.sinh(u1 + shift);
+  if (a < 0) { b -= a; a = 0; }
+  if (b > T_MAX) { a -= (b - T_MAX); b = T_MAX; a = Math.max(0, a); }
+  setWindow(a, b);
+});
+ccv.addEventListener('pointerup', () => { cDrag = null; });
+ccv.addEventListener('pointercancel', () => { cDrag = null; });
+ccv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const sc = SCALE || chronScale();
+  const tp = Math.max(0, sc.t(chronPos(e).x));
+  const f = e.deltaY > 0 ? 1.16 : 0.862;
+  const k = Math.max((S.win.t1 - S.win.t0) / 46, 1e-9);
+  const up = Math.asinh(tp / k);
+  const u0 = Math.asinh(S.win.t0 / k), u1 = Math.asinh(S.win.t1 / k);
+  setWindow(Math.max(0, k * Math.sinh(up + (u0 - up) * f)),
+            Math.min(T_MAX, k * Math.sinh(up + (u1 - up) * f)));
+}, { passive: false });
+document.getElementById('presets').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  setWindow(+b.dataset.t0, +b.dataset.t1);
+});
+
+/* --------------------------------------------------------------------- rail */
+let rDrag = false;
+const railSet = e => { const r = rcv.getBoundingClientRect(); setCoverage(yToSl(e.clientY - r.top)); };
+rcv.addEventListener('pointerdown', e => { rcv.setPointerCapture(e.pointerId); rDrag = true; railSet(e); });
+rcv.addEventListener('pointermove', e => { if (rDrag) railSet(e); });
+rcv.addEventListener('pointerup', () => { rDrag = false; });
+rcv.addEventListener('pointercancel', () => { rDrag = false; });
+rcv.addEventListener('keydown', e => {
+  const f = e.shiftKey ? 1.6 : 1.15;
+  if (e.key === 'ArrowUp' || e.key === 'ArrowRight') setCoverage(Math.max(S.kt + 1, S.kt * f));
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') setCoverage(Math.min(S.kt - 1, S.kt / f));
+  else if (e.key === 'Home') setCoverage(1);
+  else if (e.key === 'End') setCoverage(MAX_SL);
+  else return;
+  e.preventDefault();
+});
+document.getElementById('btn-allcov').addEventListener('click', () => setCoverage(1));
+
+/* ----------------------------------------------------------------- controls */
+document.getElementById('themes').addEventListener('click', e => {
+  const b = e.target.closest('.theme'); if (!b) return;
+  const t = b.dataset.theme;
+  if (S.themes.has(t)) S.themes.delete(t); else S.themes.add(t);
+  if (!S.themes.size) S.themes = new Set(THEMES);
+  changed();
+});
+document.getElementById('lens').addEventListener('change', e => { S.lens = e.target.value; changed(); });
+elDetail.addEventListener('click', e => {
+  const b = e.target.closest('[data-q]'); if (!b) return;
+  setSelection(b.dataset.q); elDetail.scrollTop = 0;
+});
+document.getElementById('btn-cluster').addEventListener('click', e => {
+  S.cluster = !S.cluster;
+  e.currentTarget.setAttribute('aria-pressed', String(S.cluster));
+  needGlobe = true; paintOnInput();
+});
+document.getElementById('btn-basemap').addEventListener('click', e => {
+  S.basemap = S.basemap === 'satellite' ? 'chart' : 'satellite';
+  const sat = S.basemap === 'satellite';
+  e.currentTarget.setAttribute('aria-pressed', String(sat));
+  e.currentTarget.textContent = sat ? 'Satellite' : 'Chart';
+  needGlobe = true; paintOnInput();
+});
+document.getElementById('btn-plates').addEventListener('click', e => {
+  S.showPlates = !S.showPlates;
+  e.currentTarget.setAttribute('aria-pressed', String(S.showPlates));
+  needGlobe = true; paintOnInput();
+});
+document.getElementById('btn-theme').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const dark = cur ? cur === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches;
+  document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+  readPalette(); SURF.key = ''; markAll(); paintOnInput();
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  readPalette(); SURF.key = ''; markAll(); paintOnInput();
+});
+
+/* ---------------------------------------------------------------- rendering */
+/* render(dt) does the work, frame(now) only schedules it, and paintOnInput
+   paints straight from the handler when rAF is not running — which it is not in
+   a document whose visibilityState is "hidden". Learned on the sibling site,
+   where the whole UI drew from inside the rAF callback and therefore never
+   appeared at all in that case. */
+let last = performance.now(), lastPaint = 0, rafPending = false, painting = false;
+
+function render(dt) {
+  lastPaint = performance.now();
+  sizeGuard();
+
+  if ((S.spin.lam || S.spin.phi) && !gDrag) {
+    S.rot.lam += S.spin.lam;
+    S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + S.spin.phi));
+    S.spin.lam *= 0.94; S.spin.phi *= 0.94;
+    if (Math.abs(S.spin.lam) < 0.008 && Math.abs(S.spin.phi) < 0.008) S.spin.lam = S.spin.phi = 0;
+    needGlobe = true;
+  }
+
+  if (needGlobe) { drawGlobe(dt); needGlobe = false; }
+  if (needChron) { drawChron(); needChron = false; }
+  if (needRail) { drawRail(); needRail = false; }
+  if (needPanel) {
+    const F = q();
+    renderDetail(); renderThemes(); renderLens();
+    document.getElementById('hdr-count').textContent = EV.length.toLocaleString();
+    document.getElementById('hd-cov').textContent = S.kt;
+    document.getElementById('hd-n').textContent = F.events.length.toLocaleString();
+    document.getElementById('rail-n').textContent = S.kt + '+';
+    const span = S.win.t1 - S.win.t0;
+    document.getElementById('rd-window').textContent =
+      S.win.t1 >= T_MAX * 0.99 ? 'all 75,000 years'
+        : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
+    const dropped = F.inWindow - F.events.length;
+    document.getElementById('rd-drop').innerHTML = dropped > 0
+      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme or lens`
+      : '';
+    document.getElementById('hd-sub').textContent =
+      S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`
+        : `${F.belowCoverage.toLocaleString()} events in this window are remembered in fewer than ${S.kt} editions.`;
+    document.getElementById('lens-hint').textContent = S.lens
+      ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
+      : 'Pick an edition to see what it does — or does not — cover.';
+    rcv.setAttribute('aria-valuenow', S.kt);
+    ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));
+    needPanel = false;
+  }
+}
+function frame(now) {
+  rafPending = false;
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  try { render(dt); } catch (err) { console.error('render failed', err); }
+  rafPending = true; requestAnimationFrame(frame);
+}
+function renderNow() {
+  last = performance.now();
+  try { render(0.016); } catch (err) { console.error('render failed', err); }
+}
+function rafIsLive() { return performance.now() - lastPaint < 250 && rafPending; }
+function paintOnInput() {
+  if (painting || rafIsLive()) return;
+  if (performance.now() - lastPaint < 11) return;
+  painting = true;
+  try { renderNow(); } finally { painting = false; }
+}
+setInterval(() => {
+  if (performance.now() - lastPaint > 400 &&
+      (needGlobe || needChron || needRail || needPanel)) renderNow();
+}, 250);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { markAll(); renderNow(); }
+});
+
+function boot() {
+  readPalette();
+  resizeGlobe(); resizeChron(); resizeRail();
+  changed();
+  renderNow();
+  requestAnimationFrame(frame);
+}
+const ro = new ResizeObserver(() => { resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow(); });
+ro.observe(document.getElementById('stage'));
+ro.observe(document.querySelector('.chron'));
+ro.observe(document.querySelector('.rail'));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { markAll(); renderNow(); });
+boot();

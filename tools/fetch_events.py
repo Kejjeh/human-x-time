@@ -91,6 +91,7 @@ def parse_year(s):
 
 
 def fetch_category(key, cls, dateprops, per_cat, min_sitelinks):
+    """The most-covered events in this category."""
     dp = "|".join(f"wdt:{p}" for p in dateprops.split("|"))
     q = f"""SELECT ?i ?iLabel ?coord ?date ?sl WHERE {{
   ?i wdt:P31/wdt:P279* wd:{cls} ;
@@ -103,26 +104,59 @@ def fetch_category(key, cls, dateprops, per_cat, min_sitelinks):
     return sparql(q)
 
 
+def fetch_tail(key, cls, dateprops, n):
+    """
+    The thinly-covered events in this category.
+
+    Ranking by sitelinks selects for things every edition covers, which silently
+    destroys the "whose record is this?" axis: in the notability-ranked head,
+    99.5% of events have an English article. In the 2-to-12-edition tail, 11% do
+    not — the Battle of Gubel survives only in Czech, German and Polish. The
+    asymmetry the axis is meant to show lives entirely down here, so the corpus
+    has to reach into it deliberately.
+    """
+    dp = "|".join(f"wdt:{p}" for p in dateprops.split("|"))
+    q = f"""SELECT ?i ?iLabel ?coord ?date ?sl WHERE {{
+  ?i wdt:P31/wdt:P279* wd:{cls} ;
+     wdt:P625 ?coord ;
+     ({dp}) ?date ;
+     wikibase:sitelinks ?sl .
+  FILTER(?sl >= 2 && ?sl <= 12)
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+}} LIMIT {n}"""
+    return sparql(q)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-cat", type=int, default=400)
     ap.add_argument("--min-sitelinks", type=int, default=6)
+    ap.add_argument("--tail", type=int, default=250,
+                    help="thinly-covered events per category; where the language asymmetry lives")
     a = ap.parse_args()
 
     events = {}
     stats = []
     for key, label, cls, theme, dateprops in CATEGORIES:
+        rows, tail_rows = [], []
         try:
             rows = fetch_category(key, cls, dateprops, a.per_cat, a.min_sitelinks)
-        except Exception as e:                       # noqa: BLE001
-            print(f"  {label:22} FAILED {type(e).__name__}")
-            stats.append((label, 0, 0))
-            continue
+        except Exception:                            # noqa: BLE001
+            print(f"  {label:22} head FAILED")
+        if a.tail:
+            try:
+                tail_rows = fetch_tail(key, cls, dateprops, a.tail)
+            except Exception:                        # noqa: BLE001
+                pass
+        rows = rows + tail_rows
+        cap = a.per_cat + a.tail
+        if not rows:
+            stats.append((label, 0, 0)); continue
 
         kept = 0
         seen_here = set()
         for r in rows:
-            if kept >= a.per_cat:
+            if kept >= cap:
                 break
             qid = r["i"]["value"].rsplit("/", 1)[-1]
             if qid in events or qid in seen_here:
@@ -142,7 +176,7 @@ def main():
             }
             kept += 1
         stats.append((label, len(rows), kept))
-        print(f"  {label:22} {len(rows):>6} rows -> {kept:>5} kept")
+        print(f"  {label:22} {len(rows):>6} rows -> {kept:>5} kept  ({len(tail_rows)} from the tail)")
         time.sleep(0.5)
 
     out = sorted(events.values(), key=lambda e: -e["sl"])
