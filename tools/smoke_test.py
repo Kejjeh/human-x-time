@@ -244,6 +244,22 @@ def run(url, headed, report):
         report.check("a pinch is not read as a click", page.evaluate("S.selection") is None,
                      f"selection={page.evaluate('S.selection')!r}")
 
+        # A cancelled pinch must not strand the gesture. Android cancels a
+        # stationary finger when long-press takes over; iOS cancels one on palm
+        # rejection. pointercancel used to null the pinch and stop, leaving the
+        # surviving finger with no drag origin and the grabbing cursor stuck on.
+        touch("touchStart", [(cx - 60, cy), (cx + 60, cy)])
+        touch("touchMove", [(cx - 120, cy), (cx + 120, cy)])
+        page.wait_for_timeout(20)
+        touch("touchCancel", [])
+        page.wait_for_timeout(80)
+        report.check("a cancelled pinch leaves no stranded state",
+                     page.evaluate("PTRS.size === 0 && pinch === null && gDrag === null"),
+                     f"PTRS.size={page.evaluate('PTRS.size')} "
+                     f"gDrag={page.evaluate('gDrag !== null')}")
+        report.check("a cancelled pinch releases the grabbing cursor",
+                     not page.evaluate("document.getElementById('globe').classList.contains('dragging')"))
+
         # Back to a normal zoom, and pick the marker nearest the middle of the
         # canvas rather than whichever happened to be drawn first: the corner
         # overlays are real elements and a click landing on one never reaches
@@ -302,6 +318,21 @@ def run(url, headed, report):
                          json.dumps(back))
             report.check("no errors after restoring from a URL", not page_errors,
                          " | ".join(page_errors[:2]))
+
+
+        # Object.prototype keys are truthy in a plain-object map, so #s=constructor
+        # put a function into S.selection and #l=only:constructor emptied the globe
+        # while the lens dropdown still read "Every edition".
+        page.goto("about:blank")
+        page.goto(url.split("#")[0] + "#s=constructor&l=only:constructor&th=toString",
+                  wait_until="load", timeout=60000)
+        page.wait_for_timeout(1200)
+        report.check("a hostile hash cannot poison the view",
+                     page.evaluate("S.selection") is None and page.evaluate("S.lens") == ""
+                     and page.evaluate("S.themes.size") == 6
+                     and page.evaluate("window.__BOOT_OK") is True,
+                     f"selection={page.evaluate('S.selection')!r} lens={page.evaluate('S.lens')!r}")
+        report.check("a hostile hash raises no errors", not page_errors, " | ".join(page_errors[:2]))
 
         browser.close()
 

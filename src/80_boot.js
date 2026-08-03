@@ -28,7 +28,7 @@ const ZMIN = 0.45, ZMAX = 4.5;
 function setZoom(z) {
   const n = Math.max(ZMIN, Math.min(ZMAX, z));
   if (n === ZOOMF) return false;
-  ZOOMF = n; resizeGlobe(); needGlobe = true;
+  ZOOMF = n; applyZoom(); needGlobe = true;
   return true;
 }
 
@@ -63,6 +63,7 @@ gcv.addEventListener('pointerdown', e => {
   if (e.isPrimary) { PTRS.clear(); pinch = null; }
   PTRS.set(e.pointerId, { x: e.clientX, y: e.clientY });
   S.spin.lam = S.spin.phi = 0;
+  TW = null;                 // a hand on the globe outranks a fly-to in progress
   gVel.length = 0;
   gcv.classList.add('dragging');
   if (PTRS.size >= 2) {
@@ -115,8 +116,9 @@ gcv.addEventListener('pointermove', e => {
   } else { tip.classList.remove('on'); gcv.style.cursor = ''; }
 });
 function endGlobeDrag(e) {
+  gcv.classList.remove('dragging');   // before the guard: a cancelled pinch has no gDrag
   if (!gDrag) return;
-  gDrag = null; gcv.classList.remove('dragging');
+  gDrag = null;
   if (!RM.matches && gVel.length) {
     const now = performance.now();
     const recent = gVel.filter(v => now - v.t < 90);
@@ -133,23 +135,35 @@ function endGlobeDrag(e) {
   }
 }
 /* Lifting a finger mid-pinch must not end the gesture, and must not be read as a
-   click. Only the last one up is a real pointerup. */
-gcv.addEventListener('pointerup', e => {
+   click. Only the last one up is a real pointerup.
+
+   pointercancel has to do exactly the same bookkeeping, which it did not: it
+   nulled the pinch and stopped. Two ways that bites, both reachable on a real
+   phone - Android cancels a stationary finger when the long-press gesture takes
+   over, iOS cancels one on palm rejection. Three fingers down and the first is
+   cancelled: the baseline still describes a pair that no longer exists, so the
+   next move divides by the wrong distance and the globe snaps to minimum zoom
+   and jumps a hundred degrees of longitude in one frame. Two fingers down and
+   one is cancelled: the survivor never gets a drag origin back, so it stops
+   rotating the globe and starts hovering tooltips instead, and the grabbing
+   cursor is still stuck on when everything is finally lifted. */
+function releasePointer(e) {
   PTRS.delete(e.pointerId);
-  if (PTRS.size >= 2) { rebasePinch(); return; }
+  if (PTRS.size >= 2) { rebasePinch(); return true; }
   pinch = null;
   if (PTRS.size === 1) {
     const p = PTRS.values().next().value;
-    gDrag = { x: p.x, y: p.y };                        // hand back without a jump
+    gDrag = { x: p.x, y: p.y, t: performance.now() };   // hand back without a jump
     gMoved = 999; gVel.length = 0;
-    return;
+    return true;
   }
-  endGlobeDrag(e);
-});
+  return false;
+}
+gcv.addEventListener('pointerup', e => { if (!releasePointer(e)) endGlobeDrag(e); });
 gcv.addEventListener('pointercancel', e => {
-  PTRS.delete(e.pointerId);
-  if (PTRS.size < 2) pinch = null;
-  if (!PTRS.size) { gDrag = null; gcv.classList.remove('dragging'); }
+  if (releasePointer(e)) return;
+  gDrag = null; gVel.length = 0;
+  gcv.classList.remove('dragging');
 });
 gcv.addEventListener('wheel', e => {
   e.preventDefault();

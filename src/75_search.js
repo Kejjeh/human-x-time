@@ -35,7 +35,7 @@ function searchEvents(qs, limit) {
 const elSearch = document.getElementById('search');
 const elResults = document.getElementById('results');
 const elSearchNote = document.getElementById('search-note');
-let SR = { hits: [], cursor: -1, total: 0 };
+let SR = { hits: [], cursor: -1, total: 0, q: '' };
 
 function hilite(label, s) {
   const i = label.toLowerCase().indexOf(s.toLowerCase());
@@ -61,7 +61,11 @@ function renderResults() {
 }
 
 function closeResults() {
-  SR = { hits: [], cursor: -1, total: 0 };
+  // Cancel the pending debounce too. Without this, dismissing the dropdown and
+  // then doing nothing for 90 ms reopens it: the timer from the last keystroke
+  // is still queued and repopulates SR behind the user's back.
+  clearTimeout(searchTimer); searchTimer = null;
+  SR = { hits: [], cursor: -1, total: 0, q: elSearch.value.trim() };
   elResults.innerHTML = '';
   elSearch.setAttribute('aria-expanded', 'false');
   elSearchNote.textContent = '';
@@ -94,15 +98,26 @@ function chooseEvent(i) {
 }
 
 let searchTimer = null;
+function runSearch() {
+  const s = elSearch.value.trim().toLowerCase();
+  SR = { hits: searchEvents(elSearch.value, 10), cursor: -1,
+         total: s.length < 2 ? 0 : countMatches(s), q: elSearch.value.trim() };
+  renderResults();
+}
 elSearch.addEventListener('input', () => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    const s = elSearch.value.trim().toLowerCase();
-    const all = searchEvents(elSearch.value, 10);
-    SR = { hits: all, cursor: -1, total: s.length < 2 ? 0 : countMatches(s) };
-    renderResults();
-  }, 90);
+  searchTimer = setTimeout(runSearch, 90);
 });
+
+/* Typing "pomp" and hitting Enter within 90 ms of the last keystroke used to
+   select the top hit for "pom", because the debounced recompute had not run yet.
+   Stamp the query the hits belong to, and flush synchronously if Enter arrives
+   before the timer does. */
+function flushSearch() {
+  clearTimeout(searchTimer); searchTimer = null;
+  runSearch();
+}
+
 
 function countMatches(s) {
   let n = 0;
@@ -122,6 +137,7 @@ elSearch.addEventListener('keydown', e => {
     if (el) el.scrollIntoView({ block: 'nearest' });
     e.preventDefault();
   } else if (e.key === 'Enter') {
+    if (SR.q !== elSearch.value.trim()) { flushSearch(); SR.cursor = -1; }
     const h = SR.hits[SR.cursor >= 0 ? SR.cursor : 0];
     if (h) chooseEvent(h.i);
     e.preventDefault();

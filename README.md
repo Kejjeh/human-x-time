@@ -1,8 +1,13 @@
 # Human × Time
 
-A globe of **7,056 dated, located human events** from Wikidata — 71,860 BCE to
+A globe of **38,242 dated, located human events** from Wikidata — 71,860 BCE to
 2026 — with two axes at right angles. Along the bottom: when it happened. Up the
 right-hand edge: **how much of the world remembers it.**
+
+Every view has a URL: the window, the coverage floor, the rotation, the themes,
+the language lens and the selection all live in `location.hash`. There is a
+search box over all 38,242 names, and choosing a result opens whatever filter is
+hiding it before flying there.
 
 Sibling to [Earth × Time](https://kejjeh.github.io/earth-x-time/), which does the
 same trick for deep time. That one asks *when did we come to believe this?* This
@@ -14,7 +19,7 @@ actually answer.
 Earth × Time earns its knowledge-time axis with hand-authored status timelines:
 every claim carries a documented `proposed → contested → superseded` history with
 citations, checked by an adversarial pass. That is expensive, which is why that
-graph is 238 claims rather than 7,000.
+graph is 275 claims rather than 38,000.
 
 Wikidata gives one date per event and no belief history. Two things were measured
 before deciding:
@@ -34,17 +39,17 @@ filters by edition. Absence is a fact about the record, not about history.
 **One caveat that shaped the corpus.** Ranking by notability selects for things
 every edition covers — in the notability-ranked head, 99.5% of events have an
 English article, which flattens the axis to nothing. The asymmetry lives in the
-tail: among battles with 2–12 editions, **11% have no English article**. The
-Battle of Gubel survives only in Czech, German and Polish. So the ingest
-deliberately reaches into the tail as well as the head; 241 events in the corpus
-have no English article.
+tail. So the ingest asks each sitelink band for its own quota rather than ranking
+a whole class by notability — which also dodges the 60-second query timeout, since
+no single query is large enough to hit it. **7,387 events in the corpus have no
+English article**, against 241 in the first cut.
 
 ## Try these
 
 | | |
 |---|---|
-| Drag the right-hand rail to the bottom | 1,321 events become 7,056. Europe fills in first and hardest. |
-| Set the lens to **Missing from en.wikipedia** | What the anglophone record does not carry. |
+| Drag the right-hand rail to the bottom | 2,183 events become 38,242. Europe fills in first and hardest. |
+| Set the lens to **Missing from en.wikipedia** | 7,387 events the anglophone record does not carry. |
 | Watch the histogram | The record thickens toward the present — that is survivorship, not history. |
 | Compare Europe with Central Asia at any coverage floor | The unevenness is the point. |
 
@@ -52,9 +57,27 @@ have no English article.
 
 One `queryEvents(axisState)` takes the time window, coverage floor, theme filter
 and language lens together and returns what is visible; globe, timeline, rail and
-panel all read its output. Screen-space clustering keeps 7,000 points from
+panel all read its output. Screen-space clustering keeps 38,000 points from
 becoming confetti — a cluster is labelled by its best-covered member, so the mark
 stands for something real rather than a centroid nobody chose.
+
+The corpus ships columnar: delta-coded zigzag varints in the coastline alphabet,
+43 bytes an event against 119 as JSON objects. `src/events.json` stays readable
+and reviewable in the diff; only the browser gets the packed form, and the build
+refuses to ship a payload that does not round-trip.
+
+The per-frame path is parallel typed arrays and allocates nothing. That matters
+in exactly one place, and it is a place a user reaches in two clicks: coverage
+floor at 1, window at maximum, clustering off, every event on screen at once.
+Batching the canvas paths and replacing a 38,000-element sort with a bounded
+34-slot insertion took that frame from **62 ms to 12 ms**. The batching is by
+depth slab first and colour second, because batching by colour alone puts one
+theme systematically on top of every overlap and tints the density map.
+
+`tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
+outside, whether it works — 39 checks, wired into the build as a gate. The sibling
+site lost a whole build to a boot failure nothing detected, and this one had no
+`safeBoot` at all until now.
 
 The globe is carried over intact from Earth × Time: canvas 2D, hand-written
 orthographic projection, NASA Blue Marble inlined, no WebGL. Rendering paints
@@ -64,24 +87,33 @@ does not fire in a document whose `visibilityState` is hidden.
 ## Building
 
 ```bash
-python tools/fetch_events.py --per-cat 400 --tail 250   # Wikidata SPARQL, 17 categories
-python tools/fetch_languages.py                         # per-edition coverage masks
-python tools/build.py                                   # single self-contained file
+python tools/fetch_events.py --per-cat 1800    # 62 categories, banded by sitelink count
+python tools/fetch_languages.py                # per-edition coverage masks, threaded
+python tools/build.py                          # packs, builds, and smoke-tests
 ```
+
+Class QIDs are **resolved by name**, never typed in by hand — that is how this
+project once reported Chicxulub as Q13415, which is a star in Canis Major. Each
+class is looked up, checked against its own label, and required to have instances
+*with coordinates*; the resolution is cached in `tools/classes.json` so it is
+reviewable in the diff. Four of 66 classes were dropped by that guard, including
+`theatre`, which resolves to the art form rather than the building.
 
 ## Toward "all of Wikipedia"
 
-12,385,308 Wikidata items have coordinates. This corpus is 7,056 of them.
+12,385,308 Wikidata items have coordinates. This corpus is 38,242 of them.
 
 | Route | Reach | Limit |
 |---|---|---|
-| SPARQL, category by category (used here) | ~50–100k | hard 60 s query timeout |
+| SPARQL, banded by sitelink count (used here) | ~50–100k | hard 60 s query timeout |
 | Toolforge / Quarry | metadata at scale | needs an account; not article text |
 | Wikidata JSON dump, streamed | everything | ~130 GB compressed, hours per pass |
 
-The timeout is the wall: counting items with coordinates returns instantly, but
-adding a date join times out. Going much past this means the dump, which is a
-batch job rather than a live query.
+The timeout is the wall, and it is not theoretical: twelve of 558 band queries
+came back 502, 504 or 429 on the big classes — villages, churches, schools — and a
+slower two-thread backfill recovered 699 of them and still could not finish
+`school`. Going much past this means the dump, which is a batch job rather than a
+live query.
 
 ## Known gaps
 

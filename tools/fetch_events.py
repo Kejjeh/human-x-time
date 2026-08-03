@@ -1,9 +1,11 @@
 """
 Pull dated, geolocated human events from Wikidata.
 
-    python tools/fetch_events.py                    # the default corpus
-    python tools/fetch_events.py --per-band 600     # bigger
-    python tools/fetch_events.py --only battle,city # one or two categories
+    python tools/fetch_events.py                     # the default corpus
+    python tools/fetch_events.py --per-cat 3000      # bigger
+    python tools/fetch_events.py --only battle,city  # one or two categories
+    python tools/fetch_events.py --only school --merge --threads 2
+                                                     # backfill what WDQS timed out on
 
 Wikidata is a poor source of *sourced dates* for deep time - across ten
 well-known geological referents it yielded one citation-backed date. For human
@@ -278,6 +280,9 @@ def main():
     ap.add_argument("--threads", type=int, default=3)
     ap.add_argument("--only", default="", help="comma-separated category keys")
     ap.add_argument("--refresh-classes", action="store_true")
+    ap.add_argument("--merge", action="store_true",
+                    help="add to the existing src/events.json instead of replacing it; "
+                         "for backfilling the bands WDQS times out on")
     a = ap.parse_args()
 
     cats = CATEGORIES
@@ -313,6 +318,12 @@ def main():
 
     theme_of = {k: t for k, _, _, t, _ in cats}
     events = {}
+    prior = {}
+    if a.merge and os.path.exists(OUT):
+        prior_doc = json.load(open(OUT, encoding="utf-8"))
+        prior = {e["q"]: e for e in prior_doc["events"]}
+        events.update(prior)
+        say(f"merging into {len(prior):,} existing events")
     per_cat = collections.Counter()
     for key, rows in results.items():
         for r in rows:
@@ -336,11 +347,24 @@ def main():
     years = [e["y"] for e in out]
     sls = [e["sl"] for e in out]
 
+    # A merge run only fetched some categories; keep the full category list from
+    # the file being merged into, or the packed corpus loses the labels for
+    # every category this run did not touch.
+    cat_rows = [{"key": k, "label": l, "theme": t} for k, l, _, t, _ in cats]
+    if a.merge and os.path.exists(OUT):
+        old = json.load(open(OUT, encoding="utf-8"))
+        have = {c["key"] for c in cat_rows}
+        cat_rows = [c for c in old.get("categories", []) if c["key"] not in have] + cat_rows
+        cat_rows.sort(key=lambda c: [x[0] for x in CATEGORIES].index(c["key"])
+                      if c["key"] in [x[0] for x in CATEGORIES] else 999)
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     doc = {"events": out,
-           "categories": [{"key": k, "label": l, "theme": t} for k, l, _, t, _ in cats],
+           "categories": cat_rows,
            "themes": THEMES,
            "classes": {k: classes[k]["qid"] for k in classes}}
+    if a.merge:
+        say(f"\nmerged: {len(prior):,} + {len(out) - len(prior):,} new = {len(out):,}")
     json.dump(doc, open(OUT, "w", encoding="utf-8"), separators=(",", ":"), ensure_ascii=False)
 
     say(f"\n{len(out):,} events -> {OUT}  ({os.path.getsize(OUT):,} bytes)  "

@@ -26,6 +26,7 @@ let PI = new Int32Array(0);
 let GX = new Float32Array(0), GY = new Float32Array(0), GD = new Float32Array(0);
 let GI = new Int32Array(0), GN = new Uint32Array(0), GMIX = new Uint8Array(0);
 let GORD = new Int32Array(0);
+const BUCKET = new Int32Array(64);      // counting-sort offsets: 6 depth slabs x 6 themes + 1
 let NG = 0;
 
 function grow(n) {
@@ -48,7 +49,14 @@ const BINS = new Map();
 function clusterInto(m, cell) {
   BINS.clear();
   for (let k = 0; k < m; k++) {
-    const key = ((PX[k] / cell) | 0) * 4093 + ((PY[k] / cell) | 0);
+    /* Math.floor, not |0. Bitwise-or truncates toward zero, so -0.9 and +0.9
+       both land in cell 0 and the row and column through the canvas origin are
+       twice as wide as every other. Zoomed in, the globe's centre is off-screen
+       and a large part of the visible disc has negative screen coordinates, so
+       that double-width cross sat right across it - two bands of markers merged
+       into neighbours they are not near. Also *4093 on a negative index
+       collides with a positive one; flooring keeps the key monotonic. */
+    const key = Math.floor(PX[k] / cell) * 4093 + Math.floor(PY[k] / cell);
     const b = BINS.get(key);
     if (b === undefined) {
       BINS.set(key, [1, PX[k], PY[k], PI[k], PD[k], THEME_IX[EV[PI[k]].theme]]);
@@ -125,15 +133,88 @@ function drawEvents() {
     }
   }
 
-  /* Painter's order, but only while sorting is cheap. Unclustered at full
-     corpus there are tens of thousands of near-identical dots and the overdraw
-     order is not perceptible, whereas a comparator sort over them is 10 ms. */
-  for (let k = 0; k < NG; k++) GORD[k] = k;
-  let ord = GORD.subarray(0, NG);
-  if (NG <= 3000) ord = ord.sort((a, b) => GD[a] - GD[b]);
-
   HN = 0;
   gx.save();
+
+  /* Turning clustering off with the coverage floor at 1 and the window at
+     maximum puts every event on screen at once. One beginPath/fill per marker
+     is 62 ms a frame there - sixteen frames a second, in the one mode where the
+     user is most likely to be dragging around looking at the density.
+
+     Batched, it is one path per theme colour: seven fills instead of a hundred
+     and fifty thousand canvas calls. The per-marker path stays for everything
+     below the threshold, because it is the one that can afford the cluster
+     ring, the mixed-theme stroke and the selection halo. */
+  // Only ever the unclustered path: on a large enough display the cell grid can
+  // exceed the threshold on its own, and clusters need the ring, the mixed-theme
+  // stroke and the count, none of which the batched path draws.
+  const DENSE = !S.cluster && NG > 2500;
+  if (DENSE) {
+    gx.beginPath();
+    for (let k = 0; k < NG; k++) {
+      const r = markerRadius(GN[k], EVSL[GI[k]]) + 1.5;
+      gx.moveTo(GX[k] + r, GY[k]);              // moveTo, or subpaths join up
+      gx.arc(GX[k], GY[k], r, 0, 7);
+    }
+    gx.fillStyle = 'rgba(4,8,14,0.5)'; gx.fill();
+
+    /* Batching by colour means one theme is drawn entirely after another, so
+       whichever theme comes last in THEMES sits on top of every overlap - the
+       density map picks up a systematic colour cast that has nothing to do with
+       the data. Painting per marker would fix it and costs 60 ms a frame here.
+       So: counting-sort the groups into DEPTH SLABS first, colour second. Front
+       slabs are still drawn over back slabs, and theme order only decides ties
+       inside one slab, where the markers are at comparable depth anyway.
+       Two O(N) passes, no allocation, and the fills stay batched. */
+    const T = THEMES.length, SLABS = 6, NB = SLABS * T;
+    BUCKET.fill(0, 0, NB + 1);
+    for (let k = 0; k < NG; k++) {
+      const slab = Math.min(SLABS - 1, (GD[k] * SLABS) | 0);   // GD is cos(angle), 0..1
+      BUCKET[slab * T + EVTH[GI[k]] + 1]++;
+    }
+    for (let b = 0; b < NB; b++) BUCKET[b + 1] += BUCKET[b];
+    for (let k = 0; k < NG; k++) {
+      const slab = Math.min(SLABS - 1, (GD[k] * SLABS) | 0);
+      GORD[BUCKET[slab * T + EVTH[GI[k]]]++] = k;
+    }
+    // BUCKET[b] now points one past bucket b, so bucket b spans [prev, BUCKET[b]).
+    let start = 0;
+    for (let b = 0; b < NB; b++) {
+      const end = BUCKET[b];
+      if (end > start) {
+        gx.beginPath();
+        for (let j = start; j < end; j++) {
+          const k = GORD[j];
+          const r = markerRadius(GN[k], EVSL[GI[k]]);
+          gx.moveTo(GX[k] + r, GY[k]);
+          gx.arc(GX[k], GY[k], r, 0, 7);
+        }
+        gx.fillStyle = CSSV[THEMES[b % T]] || CSSV.chalk;
+        gx.fill();
+      }
+      start = end;
+    }
+    for (let k = 0; k < NG; k++) {
+      HX[HN] = GX[k]; HY[HN] = GY[k];
+      HR[HN] = markerRadius(GN[k], EVSL[GI[k]]) + 6;
+      HI[HN] = GI[k]; HC[HN] = GN[k]; HN++;
+    }
+    const sel = S.selection && BY_Q[S.selection];
+    if (sel) {
+      for (let k = 0; k < NG; k++) {
+        if (GI[k] !== sel.i) continue;
+        const r = markerRadius(GN[k], EVSL[GI[k]]);
+        gx.beginPath(); gx.arc(GX[k], GY[k], r + 5, 0, 7);
+        gx.strokeStyle = CSSV.chalk; gx.lineWidth = 1.3; gx.stroke();
+        break;
+      }
+    }
+  } else {
+  /* Painter's order. Only built on the branch that uses it: the dense branch
+     does its own depth-slab bucketing, and filling and comparator-sorting an
+     array of tens of thousands only to throw it away was pure cost. */
+  for (let k = 0; k < NG; k++) GORD[k] = k;
+  const ord = GORD.subarray(0, NG).sort((a, b) => GD[a] - GD[b]);
   for (let oi = 0; oi < NG; oi++) {
     const k = ord[oi];
     const i = GI[k], n = GN[k];
@@ -164,6 +245,7 @@ function drawEvents() {
 
     HX[HN] = sx; HY[HN] = sy; HR[HN] = r + 6; HI[HN] = i; HC[HN] = n; HN++;
   }
+  }
 
   // counts inside the bigger clusters
   gx.font = `600 9px xt-mono, monospace`;
@@ -176,18 +258,30 @@ function drawEvents() {
   }
   gx.textAlign = 'start'; gx.textBaseline = 'alphabetic';
 
-  // labels: only the singles, only the well-covered, only where they fit
-  const cands = [];
+  /* Labels: only the singles, only the well-covered, only where they fit.
+
+     Collecting every candidate and sorting was most of the remaining frame cost
+     unclustered - thirty-seven thousand pushes and a comparator sort, to keep
+     thirty-four. This is a bounded insertion into a fixed 34-slot list instead:
+     one pass, no allocation, and the common case is a single comparison against
+     the current floor. */
+  const LMAX = 34;
+  const labelled = [];
+  let floorRank = -1;
   for (let k = 0; k < NG; k++) {
-    if (GN[k] === 1 || EVSL[GI[k]] > 80) cands.push(k);
+    if (GN[k] !== 1 && EVSL[GI[k]] <= 80) continue;
+    const r = EV[GI[k]].q === S.selection ? 1e9 : EVSL[GI[k]];
+    if (labelled.length === LMAX && r <= floorRank) continue;
+    let pos = labelled.length;
+    while (pos > 0 && (labelled[pos - 1].r < r)) pos--;
+    labelled.splice(pos, 0, { k, r });
+    if (labelled.length > LMAX) labelled.pop();
+    floorRank = labelled[labelled.length - 1].r;
   }
-  const rank = k => (EV[GI[k]].q === S.selection ? 1e9 : EVSL[GI[k]]);
-  cands.sort((a, b) => rank(b) - rank(a));
-  const labelled = cands.slice(0, 34);
 
   const boxes = [];
   gx.font = `400 11px xt-cond, sans-serif`;
-  for (const k of labelled) {
+  for (const { k } of labelled) {
     const e = EV[GI[k]];
     const strong = e.q === S.selection || e.q === S.hover;
     if (!strong && EVSL[GI[k]] < 90) continue;

@@ -15,7 +15,8 @@ uncorrected total. 4 bytes an event instead of a list of strings.
 
 Rewrites src/events.json in place, adding `m` (mask) and `L` (top language list).
 """
-import urllib.request, urllib.parse, json, os, time, collections
+import urllib.request, urllib.parse, json, os, time, collections, threading
+import concurrent.futures as cf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -45,21 +46,31 @@ def main():
     qids = [e["q"] for e in events]
     print(f"{len(qids):,} events; {(len(qids) + 49) // 50} batches of 50")
 
+    # Serial, this is six minutes at thirty thousand events. Four workers is
+    # polite to the API and turns it into ninety seconds.
     langs_for = {}
+    lock = threading.Lock()
+    chunks = [qids[i:i + 50] for i in range(0, len(qids), 50)]
     t0 = time.time()
-    for i in range(0, len(qids), 50):
-        chunk = qids[i:i + 50]
+    done = [0]
+
+    def work(chunk):
         ents = batch(chunk)
+        got = {}
         for qid, ent in ents.items():
             sl = ent.get("sitelinks") or {}
-            langs_for[qid] = sorted(
+            got[qid] = sorted(
                 k[:-4] for k in sl
                 if k.endswith("wiki") and k not in SKIP and "wikiquote" not in k
             )
-        done = min(i + 50, len(qids))
-        if (i // 50) % 10 == 0 or done == len(qids):
-            print(f"  {done:>5}/{len(qids)}  {time.time() - t0:.0f}s")
-        time.sleep(0.12)
+        with lock:
+            langs_for.update(got)
+            done[0] += 1
+            if done[0] % 25 == 0 or done[0] == len(chunks):
+                print(f"  {done[0] * 50:>6}/{len(qids)}  {time.time() - t0:.0f}s", flush=True)
+
+    with cf.ThreadPoolExecutor(max_workers=4) as ex:
+        list(ex.map(work, chunks))
 
     # The 32 editions that appear most often here. A fixed vocabulary, so the
     # mask means the same thing in every event and the client needs no lookup.
