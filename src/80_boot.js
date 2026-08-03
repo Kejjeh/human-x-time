@@ -287,10 +287,68 @@ function scheduleSharpen() {
 
 function paintOnInput() {
   LAST_INPUT_AT = performance.now();
+  lastInteraction = LAST_INPUT_AT;
   scheduleSharpen();
   if (painting || rafIsLive()) return;
   painting = true;
   try { renderNow(); } finally { painting = false; }
+}
+
+
+/* ------------------------------------------------------- the animation clock
+
+   Measured in a document whose visibilityState is "hidden":
+
+       requestAnimationFrame        0 Hz   (never fires)
+       main-thread setInterval(16)  1.3 Hz (clamped by intensive throttling)
+       Worker setInterval(16)      61.7 Hz (not throttled)
+
+   Input already paints itself, so dragging is smooth regardless. But anything
+   that animates on its own — the travelling dots along causal arcs, the pulse
+   on planet-wide facts, the inertia after a flick, Replay sweeping the
+   knowledge rail — has no clock at all, and ran at the watchdog's 1.3 Hz.
+
+   A dedicated worker's timer is exempt from that throttling, so one posts a
+   tick and the main thread renders on it. MessageChannel also escapes the
+   clamp, at 330,000 Hz, but that is a busy-spin rather than a clock.
+
+   The beat stands down the moment rAF starts working, so a normal foreground
+   tab is driven by rAF exactly as before, and it stops rendering after two
+   minutes without input so a genuinely backgrounded tab is not animated for
+   nobody. If the host's CSP forbids blob workers it degrades to what we had. */
+let beat = null;
+let lastInteraction = performance.now();
+const BEAT_IDLE_MS = 120000;
+
+function isAnimating() {
+  if (RM.matches) return false;
+  if (Math.abs(S.spin.lam) > 0.008 || Math.abs(S.spin.phi) > 0.008) return true;
+  return false;
+}
+
+function onBeat() {
+  if (rafIsLive()) return;                       // the real loop is back
+  if (performance.now() - lastInteraction > BEAT_IDLE_MS) return;
+  const dirty = needGlobe || needChron || needRail || needPanel;
+  if (!dirty && !isAnimating()) return;
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (isAnimating()) needGlobe = true;           // arcs and spin repaint the globe
+  try { render(dt); } catch (err) { console.error('render failed', err); }
+}
+
+function startHeartbeat() {
+  if (beat) return;
+  try {
+    const url = URL.createObjectURL(new Blob(
+      ['setInterval(function(){postMessage(0)},16);'], { type: 'text/javascript' }));
+    beat = new Worker(url);
+    URL.revokeObjectURL(url);
+    beat.onmessage = onBeat;
+  } catch (_) {
+    beat = null;                                  // CSP may forbid it; carry on
+  }
 }
 
 setInterval(() => {
@@ -307,6 +365,7 @@ function boot() {
   changed();
   renderNow();
   requestAnimationFrame(frame);
+  startHeartbeat();
 }
 const ro = new ResizeObserver(() => { resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow(); });
 ro.observe(document.getElementById('stage'));
