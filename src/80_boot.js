@@ -200,7 +200,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
    a document whose visibilityState is "hidden". Learned on the sibling site,
    where the whole UI drew from inside the rAF callback and therefore never
    appeared at all in that case. */
-let last = performance.now(), lastPaint = 0, rafPending = false, painting = false;
+let last = performance.now(), lastPaint = 0, lastRafAt = -1e9, painting = false;
 
 function render(dt) {
   lastPaint = performance.now();
@@ -244,22 +244,55 @@ function render(dt) {
   }
 }
 function frame(now) {
-  rafPending = false;
+  lastRafAt = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   try { render(dt); } catch (err) { console.error('render failed', err); }
-  rafPending = true; requestAnimationFrame(frame);
+  requestAnimationFrame(frame);
 }
 function renderNow() {
   last = performance.now();
   try { render(0.016); } catch (err) { console.error('render failed', err); }
 }
-function rafIsLive() { return performance.now() - lastPaint < 250 && rafPending; }
+/* Has the animation loop actually run lately?
+   The old test asked whether a frame had been *requested*, which is true forever
+   after the first one — rAF stops firing but the flag never clears — while
+   lastPaint keeps being refreshed by the watchdog. So the guard read as "rAF is
+   alive" permanently and paintOnInput returned early on every input, dropping
+   26 of 36 moves in a drag. Ask when a frame last ran instead. */
+function rafIsLive() { return performance.now() - lastRafAt < 120; }
+
+/* Paint on every input event. No time throttle.
+
+   A throttle needs a trailing timer to make up the frames it skips, and in a
+   document whose visibilityState is hidden — the case that made painting from
+   input necessary in the first place — chained timers are clamped to about 1Hz.
+   So the throttle dropped three quarters of a drag and the recovery never came:
+   36 pointer moves produced 9 paints.
+
+   There is no need for one. A paint costs ~1ms on a cache hit and a few ms on a
+   miss, the adaptive scale keeps it there, the re-entrancy guard stops overlap,
+   and the event loop cannot deliver the next move until this handler returns —
+   so the input rate is self-limiting. Sharpening is still deferred, because that
+   frame is expensive and belongs in the quiet after the gesture. */
+let sharpen = null;
+
+function scheduleSharpen() {
+  if (sharpen) clearTimeout(sharpen);
+  sharpen = setTimeout(() => {
+    sharpen = null;
+    needGlobe = true;
+    renderNow();                 // one crisp frame, once the hands have stopped
+  }, 190);
+}
+
 function paintOnInput() {
+  LAST_INPUT_AT = performance.now();
+  scheduleSharpen();
   if (painting || rafIsLive()) return;
-  if (performance.now() - lastPaint < 11) return;
   painting = true;
   try { renderNow(); } finally { painting = false; }
 }
+
 setInterval(() => {
   if (performance.now() - lastPaint > 400 &&
       (needGlobe || needChron || needRail || needPanel)) renderNow();

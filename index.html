@@ -665,9 +665,18 @@ function buildRays(scale) {
 
 const INV_PI = 1 / Math.PI;
 
-/* The surface only changes when the globe turns, but the causal arcs animate
-   every frame. Caching the painted sphere turns an idle frame from a 7 ms
-   re-projection into a blit. */
+/* Per-pixel trig stays native.
+
+   A lookup table for asin plus a polynomial atan2 measured ~19% faster in one
+   interleaved test and ~20% slower in another; the two disagreed because
+   routing the trig through closure parameters defeats inlining, so neither
+   number was trustworthy. The atan2 polynomial was accurate to 0.04 px, but the
+   asin table was out by 4.5 px — uniform sampling in z under-resolves near the
+   poles, where asin steepens toward a singularity. Wrong, and not measurably
+   faster, so it is gone. The responsiveness win is taken structurally below
+   instead, where it can be measured end to end.
+   ------------------------------------------------------------------------- */
+
 const SURF = { canvas: null, ctx: null, key: '' };
 
 function paintSatelliteCached(scale) {
@@ -681,8 +690,26 @@ function paintSatelliteCached(scale) {
   return true;
 }
 
+/* Adaptive resolution.
+
+   The projection cost is linear in pixel count and machines differ by an order
+   of magnitude, so the scale is chosen from what a paint actually cost here
+   rather than from a constant guessed on one laptop. Quantised to four steps so
+   the surface cache is not thrashed by a scale that drifts every frame. */
+let satFullMs = 16;                      // rolling estimate of a full-res paint;
+                                         // starts pessimistic so the first drag is
+                                         // coarse-and-smooth, then sharpens as it learns
+const SAT_BUDGET_MS = 4.5;               // what we will spend while the globe moves
+const SAT_STEPS = [0.34, 0.45, 0.6, 0.8, 1];
+function movingScale() {
+  const want = Math.sqrt(SAT_BUDGET_MS / Math.max(0.5, satFullMs));
+  for (const st of SAT_STEPS) if (st >= want) return st;
+  return 1;
+}
+
 function paintSatellite(scale) {
   if (!TEX.ready) return false;
+  const _t0 = performance.now();
   if (RAY.scale !== scale || RAY.w !== Math.round(GW * scale)) buildRays(scale);
   const { nz, nx, ny, idx, buf, count } = RAY;
   const tw = TEX.w, th = TEX.h, td = TEX.data;
@@ -718,6 +745,8 @@ function paintSatellite(scale) {
     SURF.canvas.width = RAY.w; SURF.canvas.height = RAY.h;
   }
   SURF.ctx.putImageData(RAY.img, 0, 0);
+  // normalise to a full-res equivalent so the estimate is scale-independent
+  satFullMs = satFullMs * 0.75 + ((performance.now() - _t0) / (scale * scale)) * 0.25;
   return true;
 }
 
@@ -1075,20 +1104,22 @@ function drawLabel(sx, sy, text, color, boxes, strong) {
 
 /* ------------------------------------------------------------------- render */
 let arcPhase = 0;
-let ON_IMAGERY = false;   // label scrims darken over satellite imagery
+let ON_IMAGERY = false;
+let LAST_INPUT_AT = -1e9;   // set by the input handlers; see paintOnInput   // label scrims darken over satellite imagery
 
 function drawGlobe(dt) {
   buildMatrix();
   HIT.length = 0;
   gx.clearRect(0, 0, GW, GH);
 
-  const moving = !!gDrag || Math.abs(S.spin.lam) > 0.01 || Math.abs(S.spin.phi) > 0.01;
+  const moving = !!gDrag || Math.abs(S.spin.lam) > 0.01 || Math.abs(S.spin.phi) > 0.01
+    || (performance.now() - LAST_INPUT_AT) < 170;
   const satellite = S.basemap === 'satellite' && TEX.ready;
   ON_IMAGERY = satellite;
 
   if (satellite) {
     paintAtmosphere();
-    paintSatelliteCached(moving ? 0.5 : 1);
+    paintSatelliteCached(moving ? movingScale() : 1);
   } else {
     const grd = gx.createRadialGradient(GCX - GR * 0.3, GCY - GR * 0.35, GR * 0.1, GCX, GCY, GR);
     grd.addColorStop(0, CSSV['ocean-hi']); grd.addColorStop(1, CSSV['ocean-lo']);
@@ -1758,7 +1789,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
    a document whose visibilityState is "hidden". Learned on the sibling site,
    where the whole UI drew from inside the rAF callback and therefore never
    appeared at all in that case. */
-let last = performance.now(), lastPaint = 0, rafPending = false, painting = false;
+let last = performance.now(), lastPaint = 0, lastRafAt = -1e9, painting = false;
 
 function render(dt) {
   lastPaint = performance.now();
@@ -1802,22 +1833,55 @@ function render(dt) {
   }
 }
 function frame(now) {
-  rafPending = false;
+  lastRafAt = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   try { render(dt); } catch (err) { console.error('render failed', err); }
-  rafPending = true; requestAnimationFrame(frame);
+  requestAnimationFrame(frame);
 }
 function renderNow() {
   last = performance.now();
   try { render(0.016); } catch (err) { console.error('render failed', err); }
 }
-function rafIsLive() { return performance.now() - lastPaint < 250 && rafPending; }
+/* Has the animation loop actually run lately?
+   The old test asked whether a frame had been *requested*, which is true forever
+   after the first one — rAF stops firing but the flag never clears — while
+   lastPaint keeps being refreshed by the watchdog. So the guard read as "rAF is
+   alive" permanently and paintOnInput returned early on every input, dropping
+   26 of 36 moves in a drag. Ask when a frame last ran instead. */
+function rafIsLive() { return performance.now() - lastRafAt < 120; }
+
+/* Paint on every input event. No time throttle.
+
+   A throttle needs a trailing timer to make up the frames it skips, and in a
+   document whose visibilityState is hidden — the case that made painting from
+   input necessary in the first place — chained timers are clamped to about 1Hz.
+   So the throttle dropped three quarters of a drag and the recovery never came:
+   36 pointer moves produced 9 paints.
+
+   There is no need for one. A paint costs ~1ms on a cache hit and a few ms on a
+   miss, the adaptive scale keeps it there, the re-entrancy guard stops overlap,
+   and the event loop cannot deliver the next move until this handler returns —
+   so the input rate is self-limiting. Sharpening is still deferred, because that
+   frame is expensive and belongs in the quiet after the gesture. */
+let sharpen = null;
+
+function scheduleSharpen() {
+  if (sharpen) clearTimeout(sharpen);
+  sharpen = setTimeout(() => {
+    sharpen = null;
+    needGlobe = true;
+    renderNow();                 // one crisp frame, once the hands have stopped
+  }, 190);
+}
+
 function paintOnInput() {
+  LAST_INPUT_AT = performance.now();
+  scheduleSharpen();
   if (painting || rafIsLive()) return;
-  if (performance.now() - lastPaint < 11) return;
   painting = true;
   try { renderNow(); } finally { painting = false; }
 }
+
 setInterval(() => {
   if (performance.now() - lastPaint > 400 &&
       (needGlobe || needChron || needRail || needPanel)) renderNow();
