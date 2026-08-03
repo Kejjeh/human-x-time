@@ -8,6 +8,15 @@
     </div>
 
     <div class="group">
+      <label class="lbl" for="search">Find</label>
+      <input class="search" id="search" type="search" autocomplete="off" spellcheck="false"
+             placeholder="a battle, a city, a cathedral&hellip;"
+             role="combobox" aria-expanded="false" aria-controls="results" aria-autocomplete="list" />
+      <ul class="results" id="results" role="listbox" aria-label="Search results"></ul>
+      <p class="search-note" id="search-note"></p>
+    </div>
+
+    <div class="group">
       <span class="lbl" id="lbl-themes">What kind</span>
       <div class="themes" role="group" aria-labelledby="lbl-themes" id="themes"></div>
     </div>

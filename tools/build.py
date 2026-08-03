@@ -7,9 +7,10 @@ Emits two files with identical content:
   human-x-time.html   full standalone document, for opening off disk
   artifact.html       body-only, for a host that supplies its own <head>
 """
-import json, os, re, sys
+import json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "src")
 ASSETS = os.path.join(ROOT, "assets")
@@ -32,7 +33,14 @@ def main():
     plates = coast.split("===PLATES===")[1].strip()
 
     earth = read(os.path.join(ASSETS, "earth.txt")).strip()
-    events = json.load(open(os.path.join(SRC, "events.json"), encoding="utf-8"))
+    source = json.load(open(os.path.join(SRC, "events.json"), encoding="utf-8"))
+    # src/events.json stays readable and reviewable in the diff; only the browser
+    # gets the columnar form. See tools/pack_events.py.
+    import pack_events
+    events = pack_events.pack(source)
+    bad = pack_events.verify(source, events)
+    if bad:
+        sys.exit(f"FATAL: the packed corpus does not round-trip ({bad} mismatches)")
 
     # The encoding alphabet excludes quote, backslash and angle brackets, so the
     # payloads drop into a JS string literal untouched. Assert it rather than hope.
@@ -76,12 +84,42 @@ def main():
     with open(out_idx, "w", encoding="utf-8") as f:
         f.write(open(out_std, encoding="utf-8").read())
 
-    print(f"events {len(events['events']):,}  categories {len(events['categories'])}")
+    raw = len(json.dumps(source, separators=(",", ":"), ensure_ascii=False).encode())
+    packed = len(json.dumps(events, separators=(",", ":"), ensure_ascii=False).encode())
+    print(f"events {events['n']:,}  categories {len(events['categories'])}  "
+          f"langs {len(events['langs'])}")
+    print(f"corpus {raw:,} -> {packed:,} bytes packed "
+          f"({packed / max(1, events['n']):.1f} per event)")
     print(f"land {len(land):,} chars   plates {len(plates):,} chars   earth {len(earth):,} chars")
     print(f"fonts {len(fonts):,} chars")
     print(f"js {len(js):,} chars")
     for p in (out_std, out_art, out_idx):
         print(f"  {os.path.basename(p):22} {os.path.getsize(p):,} bytes")
+
+    if "--no-smoke" not in sys.argv:
+        smoke()
+
+
+def smoke():
+    """Open the thing we just built in a real browser and prove it runs.
+
+    Not optional politeness. A build that emits a well-formed document whose
+    boot() throws on line 3 is indistinguishable from a good one by every check
+    upstream of here - that is not hypothetical, it is what happened on the
+    sibling site, and it went unnoticed for the entire build.
+    """
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        print("\n(skipping smoke test: pip install playwright && playwright install chromium)")
+        return
+    print("\nsmoke test")
+    r = subprocess.run([sys.executable, os.path.join(HERE, "smoke_test.py")],
+                       capture_output=True, text=True)
+    tail = [l for l in r.stdout.splitlines() if "FAIL" in l or "checks passed" in l]
+    print("\n".join("  " + l.strip() for l in tail) or r.stdout[-800:])
+    if r.returncode:
+        sys.exit("FATAL: the built page does not work - see above")
 
 
 if __name__ == "__main__":

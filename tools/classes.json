@@ -1,0 +1,374 @@
+{
+ "battle": {
+  "qid": "Q178561",
+  "term": "battle",
+  "label": "battle",
+  "desc": "part of a war which is well defined in duration, area and force commitment"
+ },
+ "siege": {
+  "qid": "Q188055",
+  "term": "siege",
+  "label": "siege",
+  "desc": "military blockade of a city or fortress"
+ },
+ "war": {
+  "qid": "Q198",
+  "term": "war",
+  "label": "war",
+  "desc": "organized and prolonged violent conflict between different nations, states, or different groups within a nation or state"
+ },
+ "massacre": {
+  "qid": "Q3199915",
+  "term": "massacre",
+  "label": "massacre",
+  "desc": "incident where some group is killed by another"
+ },
+ "rebellion": {
+  "qid": "Q124734",
+  "term": "rebellion",
+  "label": "rebellion",
+  "desc": "violent resistance against government"
+ },
+ "coup": {
+  "qid": "Q45382",
+  "term": "coup d'état",
+  "label": "coup d'état",
+  "desc": "act in which a segment of the military or government elites uses force to illegally and overtly overthrow an incumbent government in an attempt to seize state power"
+ },
+ "riot": {
+  "qid": "Q124757",
+  "term": "riot",
+  "label": "riot",
+  "desc": "violent public disturbance against authority, property or people"
+ },
+ "fortif": {
+  "qid": "Q57821",
+  "term": "fortification",
+  "label": "fortification",
+  "desc": "military constructions and buildings designed for defense in warfare and military bases"
+ },
+ "milbase": {
+  "qid": "Q245016",
+  "term": "military base",
+  "label": "military base",
+  "desc": "facility directly owned and operated by or for the military"
+ },
+ "treaty": {
+  "qid": "Q131569",
+  "term": "treaty",
+  "label": "treaty",
+  "desc": "express agreement between nations under international law"
+ },
+ "parliament": {
+  "qid": "Q7138926",
+  "term": "parliament building",
+  "label": "parliament building",
+  "desc": "subclass of a legislative building, used by countries/entities which have a parliamentary form of government"
+ },
+ "capital": {
+  "qid": "Q5119",
+  "term": "capital city",
+  "label": "capital city",
+  "desc": "primary governing city of a top-level (country) or first-level and second-level subdivision (country, state, province, regency, etc) political entity"
+ },
+ "courthouse": {
+  "qid": "Q1137809",
+  "term": "courthouse",
+  "label": "courthouse",
+  "desc": "building which is home to a court"
+ },
+ "embassy": {
+  "qid": "Q3917681",
+  "term": "embassy",
+  "label": "embassy",
+  "desc": "permanent diplomatic mission of higher level, representing its operator in the country the embassy is in"
+ },
+ "earthquake": {
+  "qid": "Q7944",
+  "term": "earthquake",
+  "label": "earthquake",
+  "desc": "result of a sudden release of energy in the Earth's crust that creates seismic waves"
+ },
+ "eruption": {
+  "qid": "Q7692360",
+  "term": "volcanic eruption",
+  "label": "volcanic eruption",
+  "desc": "natural phenomenon where lava, hot gases or other substances are emitted suddenly from a geological feature"
+ },
+ "shipwreck": {
+  "qid": "Q852190",
+  "term": "shipwreck",
+  "label": "shipwreck",
+  "desc": "remains of a ship that has wrecked"
+ },
+ "flood": {
+  "qid": "Q8068",
+  "term": "flood",
+  "label": "flood",
+  "desc": "overflow of water that submerges land that is usually dry"
+ },
+ "fire": {
+  "qid": "Q168983",
+  "term": "conflagration",
+  "label": "conflagration",
+  "desc": "large and destructive fire that threatens human life, animal life, health, and/or property"
+ },
+ "aircrash": {
+  "qid": "Q744913",
+  "term": "aviation accident",
+  "label": "aviation accident",
+  "desc": "aviation occurrence involving serious injury, death, or destruction of aircraft"
+ },
+ "railcrash": {
+  "qid": "Q1078765",
+  "term": "railway accident",
+  "label": "railway accident",
+  "desc": "disaster involving one or more trains (for train colliding with a pedestrian, animal or other objects, see Q19403959; for two trains, see Q11396408)"
+ },
+ "archaeology": {
+  "qid": "Q839954",
+  "term": "archaeological site",
+  "label": "archaeological site",
+  "desc": "place (or group of physical sites) in which evidence of past activity is preserved"
+ },
+ "city": {
+  "qid": "Q515",
+  "term": "city",
+  "label": "city",
+  "desc": "large human settlement"
+ },
+ "town": {
+  "qid": "Q3957",
+  "term": "town",
+  "label": "town",
+  "desc": "settlement that is smaller than a city but bigger than a large village (or a large borough in some areas)"
+ },
+ "village": {
+  "qid": "Q532",
+  "term": "village",
+  "label": "village",
+  "desc": "small clustered human settlement smaller than a town"
+ },
+ "ghosttown": {
+  "qid": "Q74047",
+  "term": "ghost town",
+  "label": "ghost town",
+  "desc": "city depopulated of inhabitants and that often stays practically intact"
+ },
+ "mine": {
+  "qid": "Q820477",
+  "term": "mine",
+  "label": "mine",
+  "desc": "place for the extraction of minerals"
+ },
+ "cemetery": {
+  "qid": "Q39614",
+  "term": "cemetery",
+  "label": "cemetery",
+  "desc": "place of burial"
+ },
+ "prison": {
+  "qid": "Q40357",
+  "term": "prison",
+  "label": "prison",
+  "desc": "place in which people are, for legal reasons, physically confined and usually deprived of a range of personal freedoms"
+ },
+ "castle": {
+  "qid": "Q23413",
+  "term": "castle",
+  "label": "castle",
+  "desc": "type of fortified structure built in Europe, Asia and the Middle East during the Middle Ages by nobility"
+ },
+ "cathedral": {
+  "qid": "Q2977",
+  "term": "cathedral",
+  "label": "cathedral",
+  "desc": "Christian church, which is seat of a bishop"
+ },
+ "church": {
+  "qid": "Q16970",
+  "term": "church building",
+  "label": "church building",
+  "desc": "building for Christian worship"
+ },
+ "mosque": {
+  "qid": "Q32815",
+  "term": "mosque",
+  "label": "mosque",
+  "desc": "place of worship for followers of Islam"
+ },
+ "synagogue": {
+  "qid": "Q34627",
+  "term": "synagogue",
+  "label": "synagogue",
+  "desc": "religious building at the center of a local organization where a Jewish (or rarely Samaritan) community gathers for prayer, education, social assistance or ceremonies"
+ },
+ "temple": {
+  "qid": "Q44539",
+  "term": "temple",
+  "label": "temple",
+  "desc": "structure reserved for religious or spiritual activities"
+ },
+ "monastery": {
+  "qid": "Q44613",
+  "term": "monastery",
+  "label": "monastery",
+  "desc": "complex of buildings comprising the domestic quarters and workplace(s) of monks or nuns"
+ },
+ "palace": {
+  "qid": "Q16560",
+  "term": "palace",
+  "label": "palace",
+  "desc": "grand residence, especially a royal or episcopal residence"
+ },
+ "heritage": {
+  "qid": "Q9259",
+  "term": "World Heritage Site",
+  "label": "World Heritage Site",
+  "desc": "place of significance listed by UNESCO"
+ },
+ "monument": {
+  "qid": "Q4989906",
+  "term": "monument",
+  "label": "monument",
+  "desc": "imposing structure created to commemorate a person or event, or used for that purpose"
+ },
+ "lighthouse": {
+  "qid": "Q39715",
+  "term": "lighthouse",
+  "label": "lighthouse",
+  "desc": "structure designed to emit light to aid navigation"
+ },
+ "bridge": {
+  "qid": "Q12280",
+  "term": "bridge",
+  "label": "bridge",
+  "desc": "structure that spans and provides a passage over a road, railway, river, or some other obstacle"
+ },
+ "dam": {
+  "qid": "Q12323",
+  "term": "dam",
+  "label": "dam",
+  "desc": "barrier that impounds water or underground streams"
+ },
+ "canal": {
+  "qid": "Q12284",
+  "term": "canal",
+  "label": "canal",
+  "desc": "man-made channel for water"
+ },
+ "tunnel": {
+  "qid": "Q44377",
+  "term": "tunnel",
+  "label": "tunnel",
+  "desc": "underground passageway"
+ },
+ "railstation": {
+  "qid": "Q55488",
+  "term": "train station",
+  "label": "railway station",
+  "desc": "railway facility where trains regularly stop to load or unload passengers and/or freight"
+ },
+ "airport": {
+  "qid": "Q1248784",
+  "term": "airport",
+  "label": "airport",
+  "desc": "location where aircraft take off and land with extended support facilities, mostly for commercial air transport"
+ },
+ "stadium": {
+  "qid": "Q483110",
+  "term": "stadium",
+  "label": "stadium",
+  "desc": "place or venue for (mostly) outdoor sports, concerts, or other events"
+ },
+ "skyscraper": {
+  "qid": "Q11303",
+  "term": "skyscraper",
+  "label": "skyscraper",
+  "desc": "very tall building"
+ },
+ "powerplant": {
+  "qid": "Q159719",
+  "term": "power station",
+  "label": "power station",
+  "desc": "facility generating electric power"
+ },
+ "factory": {
+  "qid": "Q83405",
+  "term": "factory",
+  "label": "factory",
+  "desc": "facility where goods are industrially made, or processed"
+ },
+ "university": {
+  "qid": "Q3918",
+  "term": "university",
+  "label": "university",
+  "desc": "an institution of tertiary education and research which awards academic degrees in several academic disciplines"
+ },
+ "school": {
+  "qid": "Q3914",
+  "term": "school",
+  "label": "school",
+  "desc": "institution for the education of students by teachers"
+ },
+ "observatory": {
+  "qid": "Q1254933",
+  "term": "observatory",
+  "label": "astronomical observatory",
+  "desc": "location used for observing celestial events"
+ },
+ "museum": {
+  "qid": "Q33506",
+  "term": "museum",
+  "label": "museum",
+  "desc": "institution that holds artifacts and other objects of scientific, artistic, cultural, historical, or other importance"
+ },
+ "library": {
+  "qid": "Q7075",
+  "term": "library",
+  "label": "library",
+  "desc": "institution charged with the care of a collection of literary, musical, artistic, or reference materials, such as books, manuscripts, recordings, or films"
+ },
+ "theatre": {
+  "qid": "Q24354",
+  "term": "theater building",
+  "label": "theatre building",
+  "desc": "building for performances by actors"
+ },
+ "operahouse": {
+  "qid": "Q153562",
+  "term": "opera house",
+  "label": "opera house",
+  "desc": "theatre building used for opera performances"
+ },
+ "hospital": {
+  "qid": "Q16917",
+  "term": "hospital",
+  "label": "hospital",
+  "desc": "health care facility"
+ },
+ "botanic": {
+  "qid": "Q167346",
+  "term": "botanical garden",
+  "label": "botanical garden",
+  "desc": "area displaying a wide range of plants labelled with their botanical names"
+ },
+ "zoo": {
+  "qid": "Q43501",
+  "term": "zoo",
+  "label": "zoo",
+  "desc": "collection of assorted wild animal species kept for purposes like: study, conservation and, or, commercial exhibition"
+ },
+ "expedition": {
+  "qid": "Q2401485",
+  "term": "expedition",
+  "label": "expedition",
+  "desc": "discovery or research trip to a remote or undeveloped region"
+ },
+ "spaceport": {
+  "qid": "Q194188",
+  "term": "spaceport",
+  "label": "spaceport",
+  "desc": "location used to launch and receive spacecraft"
+ }
+}

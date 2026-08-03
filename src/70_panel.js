@@ -15,7 +15,11 @@ function renderDetail() {
   const F = q();
   if (!S.selection || !BY_Q[S.selection]) {
     const top = F.events.slice().sort((a, b) => b.sl - a.sl).slice(0, 6);
-    const thin = F.events.filter(e => !(e.m & LANG_BIT.en)).slice(0, 5);
+    // Sorted, not sliced raw: the corpus arrives in year order now, so an
+    // unsorted slice would quietly become "the five oldest" instead of "the
+    // five best-covered that English has no article for".
+    const thin = F.events.filter(e => !(e.m & LANG_BIT.en))
+      .sort((a, b) => b.sl - a.sl).slice(0, 5);
     elDetail.innerHTML = `
       <div class="empty">
         <strong>Nothing selected</strong>

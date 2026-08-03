@@ -435,70 +435,14 @@ function drawArc(pts, lift, color, width, dash, dashOffset) {
 }
 
 /* ------------------------------------------------------------------ markers */
-const HIT = [];                              // screen-space hit targets, rebuilt per frame
+/* Hit targets are parallel typed arrays in 45_markers.js and are rebuilt inside
+   drawEvents; ask hitTest(x, y) for what is under the cursor. */
 
-function markerRadius(sig) { return 2.6 + sig * 1.15; }
-
-function drawMarker(sx, sy, sig, color, status, opts) {
-  const r = markerRadius(sig) * (opts.selected ? 1.5 : 1);
-  gx.save();
-  if (status === 'superseded') gx.globalAlpha = 0.34;
-  else if (status === 'proposed') gx.globalAlpha = 0.85;
-  if (opts.dimmed) gx.globalAlpha *= 0.3;
-
-  if (opts.disputed) {                        // never launder a dispute into a dot
-    gx.beginPath(); gx.arc(sx, sy, r + 3.5, 0, 7);
-    gx.strokeStyle = withAlpha(color, 0.45); gx.lineWidth = 1; gx.setLineDash([2, 2.5]);
-    gx.stroke(); gx.setLineDash([]);
-  }
-
-  // Over satellite imagery a marker can land on sunlit desert the same value as
-  // its own fill. A dark contact ring keeps every subject colour readable.
-  if (opts.onImagery) {
-    gx.beginPath(); gx.arc(sx, sy, r + 1.6, 0, 7);
-    gx.fillStyle = 'rgba(4,10,16,0.55)'; gx.fill();
-  }
-
-  gx.beginPath(); gx.arc(sx, sy, r, 0, 7);
-  if (status === 'consensus') { gx.fillStyle = color; gx.fill(); }
-  else if (status === 'contested') {
-    gx.fillStyle = withAlpha(color, 0.55); gx.fill();
-    gx.strokeStyle = color; gx.lineWidth = 1.4; gx.stroke();
-  } else {
-    gx.fillStyle = withAlpha(CSSV.abyss, 0.55); gx.fill();
-    gx.strokeStyle = color; gx.lineWidth = 1.6;
-    if (status === 'superseded') gx.setLineDash([2.5, 2.5]);
-    gx.stroke(); gx.setLineDash([]);
-  }
-
-  if (opts.selected) {
-    gx.beginPath(); gx.arc(sx, sy, r + 6, 0, 7);
-    gx.strokeStyle = CSSV.chalk; gx.lineWidth = 1.2; gx.stroke();
-  }
-  gx.restore();
-}
-
-function drawLabel(sx, sy, text, color, boxes, strong) {
-  gx.font = `${strong ? 600 : 400} 11px ${'xt-cond'}, sans-serif`;
-  const w = gx.measureText(text).width;
-  const cands = [[sx + 10, sy + 4], [sx - w - 10, sy + 4], [sx - w / 2, sy - 12], [sx - w / 2, sy + 18]];
-  for (const [bx, by] of cands) {
-    const box = [bx - 2, by - 10, w + 4, 13];
-    let hit = false;
-    for (const o of boxes) {
-      if (box[0] < o[0] + o[2] && box[0] + box[2] > o[0] && box[1] < o[1] + o[3] && box[1] + box[3] > o[1]) { hit = true; break; }
-    }
-    if (hit) continue;
-    if (bx < 4 || bx + w > GW - 4 || by < 12 || by > GH - 6) continue;
-    boxes.push(box);
-    gx.fillStyle = ON_IMAGERY ? 'rgba(4,10,16,0.66)' : withAlpha(CSSV.abyss, 0.72);
-    gx.fillRect(box[0], box[1], box[2], box[3]);
-    gx.fillStyle = strong ? (ON_IMAGERY ? '#F2F7FA' : CSSV.chalk) : color;
-    gx.fillText(text, bx, by);
-    return true;
-  }
-  return false;
-}
+/* drawMarker and drawLabel came over with the globe from the sibling site,
+   where markers are claims rather than events. Nothing here called them, and
+   drawMarker's markerRadius(sig) was in fact resolving to the two-argument
+   markerRadius in 45_markers.js - later declarations in the same script win -
+   so it would have drawn the wrong size the moment anything did call it. */
 
 /* ------------------------------------------------------------------- render */
 let arcPhase = 0;
@@ -507,7 +451,6 @@ let LAST_INPUT_AT = -1e9;   // set by the input handlers; see paintOnInput   // 
 
 function drawGlobe(dt) {
   buildMatrix();
-  HIT.length = 0;
   gx.clearRect(0, 0, GW, GH);
 
   const moving = !!gDrag || Math.abs(S.spin.lam) > 0.01 || Math.abs(S.spin.phi) > 0.01

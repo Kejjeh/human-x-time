@@ -132,6 +132,7 @@ const CENTURIES = (() => {
 
 /* ------------------------------------------------------------------ themes */
 const THEMES = DATA.themes;
+const THEME_IX = {}; THEMES.forEach((t, i) => { THEME_IX[t] = i; });
 const THEME_LABEL = {
   conflict: 'Conflict', polity: 'Politics', disaster: 'Disaster',
   settlement: 'Settlement', building: 'Building', knowledge: 'Knowledge'
@@ -160,14 +161,70 @@ const LANGS = DATA.langs || [];
 const LANG_BIT = {};
 LANGS.forEach((l, i) => { LANG_BIT[l] = 1 << i; });
 
-const EV = DATA.events.map((e, i) => {
-  const v = unit(e.lat, e.lng);
-  return { ...e, i, t: ybp(e.y), x: v[0], yv: v[1], z: v[2], theme: e.t };
-});
-// `t` was the theme key in the wire format and is the ybp here; keep both clear.
-for (let i = 0; i < EV.length; i++) EV[i].theme = DATA.events[i].t;
+/* The corpus arrives columnar: see tools/pack_events.py for the format and why.
+   Forty thousand events as JSON objects is five megabytes of key names and
+   decimal strings; packed it is a fifth of that.
 
-const MAX_SL = EV.reduce((m, e) => Math.max(m, e.sl), 1);
+   Note the shift ceiling. `x << shift` takes the shift modulo 32, so a column
+   whose values need more than 32 bits would silently wrap. Every column here is
+   at most 32 bits wide - the language mask is exactly 32 - so the highest shift
+   reached is 30 and the final `>>> 0` recovers the unsigned value. */
+function decodeVarints(s, n) {
+  const out = new Uint32Array(n);
+  let i = 0;
+  for (let k = 0; k < n; k++) {
+    let shift = 0, res = 0, b;
+    do {
+      b = AMAP[s.charCodeAt(i++)];
+      res |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    out[k] = res >>> 0;
+  }
+  return out;
+}
+const unzig = v => (v & 1) ? ~(v >>> 1) : (v >>> 1);
+
+if (DATA.v !== 2) throw new Error('events payload is not the v2 packed format');
+
+const NEV = DATA.n;
+const CATS = DATA.categories.map(c => c.key);
+const CAT_THEME = DATA.categories.map(c => c.theme);
+
+/* Hot columns as typed arrays. drawEvents runs these every frame; the object
+   array below is for everything that runs once per state change, where a plain
+   object is far easier to read and costs nothing. */
+const EVX = new Float32Array(NEV), EVYV = new Float32Array(NEV), EVZ = new Float32Array(NEV);
+const EVT = new Float32Array(NEV);          // years before present
+const EVSL = new Uint16Array(NEV);
+const EV = new Array(NEV);
+
+(() => {
+  const C = DATA.cols;
+  const names = DATA.names.split('\n');
+  if (names.length !== NEV) throw new Error(`${names.length} names for ${NEV} events`);
+  const dy = decodeVarints(C.y, NEV), dq = decodeVarints(C.q, NEV);
+  const dlat = decodeVarints(C.lat, NEV), dlng = decodeVarints(C.lng, NEV);
+  const dc = decodeVarints(C.c, NEV), dsl = decodeVarints(C.sl, NEV);
+  const dm = decodeVarints(C.m, NEV);
+  let year = 0;
+  for (let i = 0; i < NEV; i++) {
+    year += unzig(dy[i]);                    // delta-coded: the corpus is in year order
+    const lat = unzig(dlat[i]) / 1000, lng = unzig(dlng[i]) / 1000;
+    const a = lng * Math.PI / 180, b = lat * Math.PI / 180, cb = Math.cos(b);
+    EVX[i] = cb * Math.cos(a); EVYV[i] = cb * Math.sin(a); EVZ[i] = Math.sin(b);
+    EVT[i] = PRESENT - year;
+    EVSL[i] = dsl[i];
+    EV[i] = {
+      i, q: 'Q' + dq[i], n: names[i], lat, lng, y: year,
+      c: CATS[dc[i]], theme: CAT_THEME[dc[i]], sl: dsl[i], m: dm[i],
+      t: EVT[i], x: EVX[i], yv: EVYV[i], z: EVZ[i]
+    };
+  }
+})();
+
+let MAX_SL = 1;
+for (let i = 0; i < NEV; i++) if (EVSL[i] > MAX_SL) MAX_SL = EVSL[i];
 const BY_Q = {}; for (const e of EV) BY_Q[e.q] = e;
 
 /* -------------------------------------------------------------------- state */

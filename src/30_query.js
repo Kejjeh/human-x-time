@@ -13,13 +13,20 @@ function lensTest(A) {
   return mode === 'only' ? (e => (e.m & bit) !== 0) : (e => (e.m & bit) === 0);
 }
 
+/* Returns both shapes on purpose. `idx` is what the per-frame globe code walks -
+   an Int32Array of positions into the typed columns, so the hot loop never
+   touches an object. `events` is the same set as EV objects, for the panels and
+   the histogram, which run once per state change and are far easier to read
+   that way. */
 function queryEvents(A) {
   const lens = lensTest(A);
   const out = [];
+  const idx = new Int32Array(NEV);
+  let m = 0;
   const themeCounts = {}; for (const t of THEMES) themeCounts[t] = 0;
   let inWindow = 0, belowCoverage = 0, lensDropped = 0;
 
-  for (let i = 0; i < EV.length; i++) {
+  for (let i = 0; i < NEV; i++) {
     const e = EV[i];
     if (e.t < A.win.t0 || e.t > A.win.t1) continue;
     inWindow++;
@@ -28,41 +35,14 @@ function queryEvents(A) {
     themeCounts[e.theme]++;
     if (!A.themes.has(e.theme)) continue;
     out.push(e);
+    idx[m++] = i;
   }
-  return { events: out, themeCounts, inWindow, belowCoverage, lensDropped,
-           total: EV.length };
+  return { events: out, idx: idx.subarray(0, m), n: m,
+           themeCounts, inWindow, belowCoverage, lensDropped, total: NEV };
 }
 
 let QCACHE = null;
 function invalidate() { QCACHE = null; }
 function q() { return QCACHE || (QCACHE = queryEvents(S)); }
 
-/* ---------------------------------------------------------------- clustering
-   Seven thousand points on a globe is confetti. Bin in screen space and draw
-   one marker per occupied cell, sized by how many fell into it, so density
-   reads as density instead of as an unreadable smear. The most-covered event in
-   each cell supplies the label and the click target — the cell stands for
-   something real rather than for a centroid nobody chose. */
-function clusterScreen(pts, cell) {
-  const bins = new Map();
-  for (const p of pts) {
-    const kx = (p.sx / cell) | 0, ky = (p.sy / cell) | 0;
-    const key = kx * 4093 + ky;
-    let b = bins.get(key);
-    if (!b) { b = { n: 0, sx: 0, sy: 0, top: null, themes: new Set() }; bins.set(key, b); }
-    b.n++; b.sx += p.sx; b.sy += p.sy;
-    b.themes.add(p.e.theme);
-    if (!b.top || p.e.sl > b.top.e.sl) b.top = p;
-  }
-  const out = [];
-  for (const b of bins.values()) {
-    out.push({
-      n: b.n,
-      sx: b.n === 1 ? b.top.sx : b.sx / b.n,
-      sy: b.n === 1 ? b.top.sy : b.sy / b.n,
-      e: b.top.e, d: b.top.d,
-      mixed: b.themes.size > 1
-    });
-  }
-  return out;
-}
+/* Clustering lives in 45_markers.js now, next to the typed arrays it fills. */
