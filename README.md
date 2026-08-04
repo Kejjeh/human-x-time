@@ -79,6 +79,15 @@ outside, whether it works — 39 checks, wired into the build as a gate. The sib
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
+`tools/check_no_local_paths.py` refuses any commit whose staged content carries
+an absolute path out of somebody's home directory — `C:\Users\…`, `/Users/…`,
+`/home/…`. It exists because one nearly shipped in
+`docs/ux-review-2026-08-03.md`, written by an agent that had been handed
+absolute paths in its brief; it was caught by hand, which is not a control.
+Obvious placeholders (`/home/you/…`) still pass. The hook is versioned in
+`.githooks/` so it is reviewable in the diff; a fresh clone arms it once with
+`git config core.hooksPath .githooks`.
+
 The globe is carried over intact from Earth × Time: canvas 2D, hand-written
 orthographic projection, NASA Blue Marble inlined, no WebGL. Rendering paints
 from input handlers rather than only from `requestAnimationFrame`, because rAF
