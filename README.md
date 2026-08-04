@@ -124,3 +124,8 @@ live query.
   there to make them visible rather than to correct them.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
+- **A UX review found twelve more, none of them implemented.** Chief among them: a
+  tap on a marker shows nothing, because the tooltip never fires on touch and the
+  detail panel sits ~990px below the fold. See
+  [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers this
+  site and its sibling together.
