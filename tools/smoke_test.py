@@ -641,6 +641,58 @@ def run(url, headed, report):
             report.check("a single edition is not \"1 language editions\"",
                          "1 language editions" not in bar["singular"], repr(bar["singular"]))
 
+        # pointermove fires per pixel. The tip rebuilt its innerHTML and
+        # re-measured its width on every one - a DOM parse and a forced layout
+        # sixty times a second for a tip whose text never changed - and the drag
+        # branch read the canvas box it never uses.
+        churn = page.evaluate("""() => {
+          let rects = 0, writes = 0, measures = 0;
+          const realRect = Element.prototype.getBoundingClientRect;
+          Element.prototype.getBoundingClientRect = function () { rects++; return realRect.call(this); };
+          const tip = document.getElementById('tip');
+          const ih = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+          Object.defineProperty(tip, 'innerHTML', {
+            set(v) { writes++; ih.set.call(this, v); }, get() { return ih.get.call(this); },
+            configurable: true });
+          const ow = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+          Object.defineProperty(tip, 'offsetWidth',
+            { get() { measures++; return ow.get.call(this); }, configurable: true });
+
+          let k = -1;
+          for (let i = 0; i < HN; i++) if (HR[i] > 10) { k = i; break; }
+          const out = { found: k >= 0 };
+          if (k >= 0) {
+            const box = realRect.call(gcv);
+            writes = 0; measures = 0;
+            for (let i = 0; i < 30; i++)
+              gcv.dispatchEvent(new PointerEvent('pointermove', {
+                clientX: box.left + HX[k] + (i % 3) - 1, clientY: box.top + HY[k] + ((i >> 1) % 3) - 1,
+                bubbles: true, pointerId: 1, pointerType: 'mouse' }));
+            out.hoverWrites = writes; out.hoverMeasures = measures;
+          }
+          rects = 0;
+          gcv.dispatchEvent(new PointerEvent('pointerdown', {clientX: 600, clientY: 400,
+            bubbles: true, pointerId: 2, pointerType: 'mouse', isPrimary: true, button: 0}));
+          for (let i = 0; i < 30; i++)
+            gcv.dispatchEvent(new PointerEvent('pointermove',
+              {clientX: 600 + i, clientY: 400, bubbles: true, pointerId: 2, pointerType: 'mouse'}));
+          gcv.dispatchEvent(new PointerEvent('pointerup', {clientX: 630, clientY: 400,
+            bubbles: true, pointerId: 2, pointerType: 'mouse'}));
+          out.dragRects = rects;
+          Element.prototype.getBoundingClientRect = realRect;
+          delete tip.innerHTML; delete tip.offsetWidth;
+          S.spin.lam = 0; S.spin.phi = 0;
+          return out;
+        }""")
+        if churn.get("found"):
+            report.check("holding still over one marker does not rebuild the tip",
+                         churn["hoverWrites"] <= 2 and churn["hoverMeasures"] <= 2,
+                         f"{churn['hoverWrites']} rebuilds and "
+                         f"{churn['hoverMeasures']} measures across 30 moves")
+        report.check("dragging forces no layout it does not use",
+                     churn["dragRects"] == 0,
+                     f"{churn['dragRects']} getBoundingClientRect across 30 drag moves")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")

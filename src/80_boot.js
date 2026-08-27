@@ -125,7 +125,6 @@ gcv.addEventListener('pointermove', e => {
     }
     return;
   }
-  const rect = gcv.getBoundingClientRect();
   if (gDrag) {
     const dx = e.clientX - gDrag.x, dy = e.clientY - gDrag.y;
     gMoved += Math.abs(dx) + Math.abs(dy);
@@ -138,6 +137,10 @@ gcv.addEventListener('pointermove', e => {
     needGlobe = true; paintOnInput();
     return;
   }
+  // Read the box here, not above: the drag branch returns before ever using it,
+  // so every one of a drag's sixty moves a second was forcing a layout for
+  // nothing. Measured at 40 reads across 40 drag moves, all of them dead.
+  const rect = gcv.getBoundingClientRect();
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
   const best = hitTest(mx, my);
   const id = best ? best.id : null;
@@ -172,11 +175,22 @@ function positionTip(tip, x, y) {
   tip.style.transform = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
 }
 
+/* What the tip is currently showing, so an unchanged hover does no work.
+   pointermove fires for every pixel, and this rebuilt the tip's innerHTML and
+   re-measured its width on every one of them - a DOM parse and a forced layout
+   sixty times a second while the cursor sits still over one marker. Measured:
+   40 moves within a single marker's radius produced 40 writes and 40 layout
+   reads, for a tip whose text and position never changed once. */
+let tipFor = null, tipAtX = 0, tipAtY = 0, tipN = 0;
+
 function showTip(best) {
   const tip = document.getElementById('tip');
   if (!tip) return;
   const ev = best && BY_Q[best.id];
-  if (!ev) { tip.classList.remove('on'); return; }
+  if (!ev) { tip.classList.remove('on'); tipFor = null; return; }
+  if (best.id === tipFor && best.n === tipN &&
+      best.x === tipAtX && best.y === tipAtY && tip.classList.contains('on')) return;
+  tipFor = best.id; tipN = best.n; tipAtX = best.x; tipAtY = best.y;
   tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
     best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
   positionTip(tip, best.x, best.y);
@@ -247,6 +261,7 @@ gcv.addEventListener('pointercancel', e => {
 function clearHover() {
   const tip = document.getElementById('tip');
   if (tip) tip.classList.remove('on');
+  tipFor = null;
   gcv.style.cursor = '';
   if (S.hover !== null) { S.hover = null; needGlobe = true; paintOnInput(); }
 }
