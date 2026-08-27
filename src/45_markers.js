@@ -306,7 +306,10 @@ function drawEvents() {
     floorRank = labelled[labelled.length - 1].r;
   }
 
+  /* Seeded with the stage overlays, so a name is never drawn under the headline
+     or the buttons. Free: this array is allocated per frame either way. */
   const boxes = [];
+  for (let i = 0; i < OVERLAYS.length; i++) boxes.push(OVERLAYS[i]);
   gx.font = `400 11px xt-cond, sans-serif`;
   for (const { k } of labelled) {
     const e = EV[GI[k]];

@@ -504,6 +504,9 @@ function render(dt) {
        the time axis announced "3200" for a window the page calls "the last
        3,200 years", and the rail announced "40" where the readout says "40+
        language editions". aria-valuetext is what carries the units. */
+    // The headline's height follows the sub-line, so the overlay rects the label
+    // placer avoids are re-measured here rather than only on resize.
+    measureOverlays();
     rcv.setAttribute('aria-valuemin', 0);
     rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
