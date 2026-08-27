@@ -355,7 +355,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
       <div class="rail-sub">language editions</div>
     </div>
     <canvas id="railcv" tabindex="0" role="slider"
-            aria-label="Coverage floor: minimum number of Wikipedia language editions"
+            aria-label="Coverage floor: minimum number of Wikipedia language editions. Arrow keys adjust, Home for none, End for the most widely carried."
             aria-valuemin="0" aria-valuemax="300" aria-valuenow="1"></canvas>
     <div class="rail-foot">
       <button class="iconbtn" id="btn-allcov">Show all</button>
@@ -375,7 +375,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
       </span>
     </div>
     <canvas id="chroncv" tabindex="0" role="slider"
-            aria-label="Time axis. Drag to pan, scroll to zoom."
+            aria-label="Time axis. Drag or arrow keys to pan, scroll or up and down to zoom, Home for all of time."
             aria-valuemin="0" aria-valuemax="75000" aria-valuenow="3200"></canvas>
   </section>
 
@@ -2554,6 +2554,50 @@ document.getElementById('presets').addEventListener('click', e => {
   setWindow(+b.dataset.t0, +b.dataset.t1);
 });
 
+/* The time axis is a focusable role="slider" and it answered no key at all.
+ *
+ * The rail next to it handles six. This one you could Tab to, hear announced as
+ * a slider, and press every arrow on with nothing happening - which is worse
+ * than not being focusable, because it advertises an affordance it does not
+ * have. The only way to move the window was a pointer.
+ *
+ * Same asinh arithmetic as the wheel, so the keyboard and the wheel agree about
+ * what a zoom is, and both stay anchored the way a drag does. */
+function zoomWindow(anchorT, f) {
+  const k = Math.max((S.win.t1 - S.win.t0) / 46, 1e-9);
+  const up = Math.asinh(Math.max(0, anchorT) / k);
+  const u0 = Math.asinh(S.win.t0 / k), u1 = Math.asinh(S.win.t1 / k);
+  setWindow(Math.max(0, k * Math.sinh(up + (u0 - up) * f)),
+            Math.min(T_MAX, k * Math.sinh(up + (u1 - up) * f)));
+}
+function panWindow(fraction) {
+  const k = Math.max((S.win.t1 - S.win.t0) / 46, 1e-9);
+  const u0 = Math.asinh(S.win.t0 / k), u1 = Math.asinh(S.win.t1 / k);
+  const shift = (u1 - u0) * fraction;
+  let a = k * Math.sinh(u0 + shift), b = k * Math.sinh(u1 + shift);
+  if (a < 0) { b -= a; a = 0; }
+  if (b > T_MAX) { a -= (b - T_MAX); b = T_MAX; a = Math.max(0, a); }
+  setWindow(a, b);
+}
+ccv.addEventListener('keydown', e => {
+  const big = e.shiftKey;
+  const mid = () => {
+    const sc = SCALE || chronScale();
+    return Math.max(0, sc.t(CW / 2));
+  };
+  // Right is toward the present, which is toward smaller ybp.
+  if (e.key === 'ArrowRight') panWindow(big ? -0.4 : -0.12);
+  else if (e.key === 'ArrowLeft') panWindow(big ? 0.4 : 0.12);
+  else if (e.key === 'ArrowUp' || e.key === '+' || e.key === '=') zoomWindow(mid(), big ? 0.7 : 0.862);
+  else if (e.key === 'ArrowDown' || e.key === '-') zoomWindow(mid(), big ? 1.43 : 1.16);
+  else if (e.key === 'PageUp') zoomWindow(mid(), 0.5);
+  else if (e.key === 'PageDown') zoomWindow(mid(), 2);
+  else if (e.key === 'Home') setWindow(0, T_MAX);
+  else if (e.key === 'End') setWindow(0, 130);
+  else return;
+  e.preventDefault();
+});
+
 /* --------------------------------------------------------------------- rail */
 let rDrag = false;
 const railSet = e => { const r = rcv.getBoundingClientRect(); setCoverage(yToSl(e.clientY - r.top)); };
@@ -2693,10 +2737,20 @@ function render(dt) {
     document.getElementById('lens-hint').textContent = S.lens
       ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
       : 'Pick an edition to see what it does — or does not — cover.';
+    /* aria-valuenow alone is a bare number in a unit nothing on screen uses:
+       the time axis announced "3200" for a window the page calls "the last
+       3,200 years", and the rail announced "40" where the readout says "40+
+       language editions". aria-valuetext is what carries the units. */
     rcv.setAttribute('aria-valuemin', 0);
     rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
+    rcv.setAttribute('aria-valuetext', S.kt <= 0
+      ? 'no coverage floor; every event'
+      : `carried by at least ${S.kt} Wikipedia language edition${S.kt === 1 ? '' : 's'}`);
     ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));
+    ccv.setAttribute('aria-valuetext', S.win.t1 >= T_MAX * 0.99
+      ? 'all 75,000 years'
+      : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`);
     needPanel = false;
   }
 }
