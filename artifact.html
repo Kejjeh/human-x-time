@@ -1911,25 +1911,49 @@ function renderLens() {
    magnitude this is the first thing to revisit.
 
    Ranking is prefix, then word-start, then substring, then coverage - so typing
-   "roma" gives Rome before Romanshorn, and "cathedral" gives the ones the world
-   has actually heard of first.
+   "york" gives York before York Minster and both before New York, and
+   "cathedral" gives the ones the world has actually heard of first.
    ========================================================================== */
 
 const NAME_LC = new Array(NEV);
 for (let i = 0; i < NEV; i++) NAME_LC[i] = EV[i].n.toLowerCase();
 
+const WORD_BREAK = /[\s(,'\-]/;
+
+/* One pass, bounded insertion, and the total falls out of the same walk.
+   The note above says a linear scan is "roughly a millisecond". It was for a
+   rare term and not for a common one: "an" matches 8,913 names, and pushing an
+   object per match, sorting all 8,913 of them and then scanning the corpus a
+   second time in countMatches to get the total cost 7.46 ms - on the main
+   thread, on every keystroke, which is a dropped frame while you type. Keeping
+   ten and counting as we go is 0.9 ms for the same query. Same output: rank
+   descending, then coverage descending, ties in corpus order, because the
+   insertion stops at the first element that is not strictly worse. */
+let SEARCH_TOTAL = 0;
+
 function searchEvents(qs, limit) {
   const s = qs.trim().toLowerCase();
+  SEARCH_TOTAL = 0;
   if (s.length < 2) return [];
+  const k = limit || 10;
   const hits = [];
+  let floorRank = -1, floorSl = -1;
   for (let i = 0; i < NEV; i++) {
-    const k = NAME_LC[i].indexOf(s);
-    if (k < 0) continue;
-    const rank = k === 0 ? 3 : /[\s(,'\-]/.test(NAME_LC[i][k - 1]) ? 2 : 1;
-    hits.push({ i, rank, sl: EVSL[i] });
+    const at = NAME_LC[i].indexOf(s);
+    if (at < 0) continue;
+    SEARCH_TOTAL++;
+    const rank = at === 0 ? 3 : WORD_BREAK.test(NAME_LC[i][at - 1]) ? 2 : 1;
+    const sl = EVSL[i];
+    if (hits.length === k && (rank < floorRank || (rank === floorRank && sl <= floorSl))) continue;
+    let pos = hits.length;
+    while (pos > 0 && (hits[pos - 1].rank < rank ||
+                       (hits[pos - 1].rank === rank && hits[pos - 1].sl < sl))) pos--;
+    hits.splice(pos, 0, { i, rank, sl });
+    if (hits.length > k) hits.pop();
+    const last = hits[hits.length - 1];
+    floorRank = last.rank; floorSl = last.sl;
   }
-  hits.sort((a, b) => b.rank - a.rank || b.sl - a.sl);
-  return hits.slice(0, limit || 10);
+  return hits;
 }
 
 const elSearch = document.getElementById('search');
@@ -1999,9 +2023,9 @@ function chooseEvent(i) {
 
 let searchTimer = null;
 function runSearch() {
-  const s = elSearch.value.trim().toLowerCase();
-  SR = { hits: searchEvents(elSearch.value, 10), cursor: -1,
-         total: s.length < 2 ? 0 : countMatches(s), q: elSearch.value.trim() };
+  // searchEvents sets SEARCH_TOTAL on the same walk, so there is no second scan.
+  const hits = searchEvents(elSearch.value, 10);
+  SR = { hits, cursor: -1, total: SEARCH_TOTAL, q: elSearch.value.trim() };
   renderResults();
 }
 elSearch.addEventListener('input', () => {
@@ -2018,12 +2042,6 @@ function flushSearch() {
   runSearch();
 }
 
-
-function countMatches(s) {
-  let n = 0;
-  for (let i = 0; i < NEV; i++) if (NAME_LC[i].indexOf(s) >= 0) n++;
-  return n;
-}
 
 elSearch.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -2227,10 +2245,33 @@ function setCoverage(n) {
   if (v === S.kt) return;
   S.kt = v; changed();
 }
+/* The narrowest window the axis will hold. */
+const MIN_SPAN = 20;
+
+/* At the floor, grow about the MIDPOINT.
+ *
+ * This used to clamp the span and then rebuild the window as [t0, t0 + span] -
+ * keeping the left edge and letting the right one run. Zoom-to-cursor holds
+ * exactly until the requested span drops under 20 years, and from that scroll
+ * on the window stops shrinking and starts sliding: traced at the wheel, the
+ * year under the cursor sat at 276.49 for 27 straight steps and then began to
+ * creep, and forty steps in the point being zoomed toward was 28 years outside
+ * the window entirely. A zoom that has hit its limit should stop, not pan.
+ *
+ * A reversed pair is ordered rather than read as a 20-year window at t0, which
+ * is what max(20, t1 - t0) turned it into. */
 function setWindow(t0, t1) {
-  const span = Math.max(20, Math.min(T_MAX, t1 - t0));
-  let a = Math.max(0, t0), b = a + span;
-  if (b > T_MAX) { b = T_MAX; a = Math.max(0, b - span); }
+  if (t1 < t0) { const swap = t0; t0 = t1; t1 = swap; }
+  let span = t1 - t0;
+  if (span < MIN_SPAN) {
+    const mid = (t0 + t1) / 2;
+    t0 = mid - MIN_SPAN / 2; t1 = mid + MIN_SPAN / 2; span = MIN_SPAN;
+  } else if (span > T_MAX) {
+    t0 = 0; t1 = T_MAX; span = T_MAX;
+  }
+  let a = t0, b = t1;
+  if (a < 0) { a = 0; b = span; }                 // shift, the way a drag does
+  if (b > T_MAX) { b = T_MAX; a = T_MAX - span; }
   S.win.t0 = a; S.win.t1 = b; changed();
 }
 function setSelection(qid) { S.selection = qid; changed(); }

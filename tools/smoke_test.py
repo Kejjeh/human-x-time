@@ -422,6 +422,54 @@ def run(url, headed, report):
                              page.evaluate("S.selection") is not None,
                              f"selection={page.evaluate('S.selection')!r}")
 
+        # Zoom-to-cursor holds until the requested span drops under the 20-year
+        # floor. setWindow then rebuilt the window as [t0, t0 + 20] - keeping
+        # the left edge and letting the right one run - so every further scroll
+        # panned instead of doing nothing: 68 years of drift over 52 steps.
+        floor = page.evaluate("""() => {
+          setWindow(0, 3200); drawChron();
+          const ax = CW * 0.5, wins = [];
+          for (let i = 0; i < 80; i++) {
+            const s = SCALE || chronScale(), tp = Math.max(0, s.t(ax));
+            const k = Math.max((S.win.t1 - S.win.t0) / 46, 1e-9);
+            const up = Math.asinh(tp / k), u0 = Math.asinh(S.win.t0 / k),
+                  u1 = Math.asinh(S.win.t1 / k);
+            setWindow(Math.max(0, k * Math.sinh(up + (u0 - up) * 0.862)),
+                      Math.min(T_MAX, k * Math.sinh(up + (u1 - up) * 0.862)));
+            drawChron();
+            wins.push([S.win.t0, S.win.t1]);
+          }
+          const at = wins.filter(w => Math.abs(w[1] - w[0] - MIN_SPAN) < 1e-6);
+          return { n: at.length,
+                   slide: at.length < 2 ? 0 : Math.abs(at[at.length - 1][0] - at[0][0]) };
+        }""")
+        report.check("zooming past the floor does not pan the window",
+                     floor["n"] > 5 and floor["slide"] < 8,
+                     f"{floor['slide']:.1f} years over {floor['n']} steps at the floor")
+        page.evaluate("setWindow(0, 3200);")
+
+        # One walk keeps the top ten and counts every match; the total has to be
+        # the real one, not an estimate, because the UI prints it.
+        srch = page.evaluate("""() => {
+          const out = {};
+          for (const s of ['an', 'the', 'york']) {
+            const hits = searchEvents(s, 10);
+            let brute = 0;
+            for (let i = 0; i < NEV; i++) if (NAME_LC[i].indexOf(s) >= 0) brute++;
+            out[s] = { total: SEARCH_TOTAL, brute, top: hits.length ? EV[hits[0].i].n : null,
+                       ordered: hits.every((h, k) => k === 0 ||
+                         hits[k - 1].rank > h.rank ||
+                         (hits[k - 1].rank === h.rank && hits[k - 1].sl >= h.sl)) };
+          }
+          return out;
+        }""")
+        report.check("search counts every match exactly",
+                     all(v["total"] == v["brute"] for v in srch.values()),
+                     ", ".join(f"{k} {v['total']}/{v['brute']}" for k, v in srch.items()))
+        report.check("search ranks prefix over word-start over coverage",
+                     all(v["ordered"] for v in srch.values()) and srch["york"]["top"] == "York",
+                     f"top hit for 'york' is {srch['york']['top']!r}")
+
         # -------------------------------------------------------- URL state
         if page.evaluate("typeof writeHash === 'function'"):
             page.evaluate("setCoverage(12); S.rot.lam = 123; S.rot.phi = -33; writeHash(true);")
