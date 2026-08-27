@@ -1,6 +1,19 @@
-import urllib.request, json, math, os
+"""Fetch and encode the coastlines and plate boundaries the globe draws.
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coast_out.txt")
+    python tools/fetch_coast.py
+
+Natural Earth 110m land plus the PB2002 plate boundaries, Douglas-Peucker
+simplified, delta-coded as zigzag varints in the same 64-character alphabet the
+event corpus uses - see decodeRings() in src/20_core.js for the other half.
+
+Writes assets/coast.txt, which is where tools/build.py reads it from. It used to
+write tools/coast_out.txt, which nothing reads: you could regenerate the
+coastlines, run the build, and get a byte-identical page with no error anywhere.
+"""
+import urllib.request, json, math, os, sys
+
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   "assets", "coast.txt")
 ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-"
 SCALE = 32.0  # 1/32 degree ~ 3.5 km
 
@@ -100,6 +113,15 @@ def build(url, tol, min_area, label):
 land = build("https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_land.geojson", 0.42, 1.1, "land")
 plates = build("https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json", 0.9, 0, "plates")
 
+# Half a result is worse than none: an empty land payload decodes to zero rings,
+# so chart mode loses every coastline and the page still looks like it works.
+# build() prints SKIP and returns None on a failed fetch; do not write over a
+# good asset with that.
+missing = [n for n, v in (("land", land), ("plates", plates)) if not v]
+if missing:
+    sys.exit(f"refusing to write {OUT}: no {' or '.join(missing)} payload")
+
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, "w", encoding="utf-8") as f:
-    f.write("===LAND===\n" + (land or "") + "\n===PLATES===\n" + (plates or "") + "\n")
+    f.write("===LAND===\n" + land + "\n===PLATES===\n" + plates + "\n")
 print("wrote", OUT)

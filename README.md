@@ -101,6 +101,22 @@ python tools/fetch_languages.py                # per-edition coverage masks, thr
 python tools/build.py                          # packs, builds, and smoke-tests
 ```
 
+The three inlined assets change far less often and have their own fetchers, each
+writing the file `build.py` reads:
+
+```bash
+python tools/fetch_coast.py                    # -> assets/coast.txt
+python tools/fetch_fonts.py                    # -> assets/fonts.css
+python tools/fetch_texture.py                  # -> assets/earth.txt
+```
+
+Two of those used to write `tools/coast_out.txt` and `tools/fonts_out.css`, which
+nothing reads — you could regenerate an asset, run the build, and get the old one
+back with no error anywhere. They also wrote a plausible-looking partial file when
+a fetch failed; an empty land payload decodes to zero rings, so chart mode loses
+every coastline and the page still looks like it works. Both now refuse to write
+at all rather than write half a result.
+
 Class QIDs are **resolved by name**, never typed in by hand — that is how this
 project once reported Chicxulub as Q13415, which is a star in Canis Major. Each
 class is looked up, checked against its own label, and required to have instances
