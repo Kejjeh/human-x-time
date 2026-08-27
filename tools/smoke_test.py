@@ -157,6 +157,38 @@ def run(url, headed, report):
         opts = page.evaluate("document.getElementById('lens').options.length")
         report.check("the language lens is populated", opts > 10, f"{opts} options")
 
+        # The worker beat exists for the case rAF does not fire. While rAF is
+        # healthy it used to keep posting at 60Hz anyway - 125 messages in two
+        # seconds, every one a main-thread dispatch that reads a clock and
+        # returns - and kept doing it past the two-minute idle cutoff meant to
+        # stop it. It watches at 2Hz now and only runs the clock when it is one.
+        if page.evaluate("beat !== null"):
+            page.evaluate("window.__beats = 0; const p = beat.onmessage;"
+                          " beat.onmessage = e => { window.__beats++; p(e); };")
+            page.wait_for_timeout(1500)
+            idle = page.evaluate("({beats: __beats, ms: beatMs, raf: rafIsLive()})")
+            report.check("the beat stands down while rAF is healthy",
+                         idle["raf"] and idle["ms"] > 100 and idle["beats"] < 20,
+                         f"{idle['beats']} beats in 1.5s at {idle['ms']}ms")
+
+            # ...and is still a real clock when rAF stops.
+            page.evaluate("""() => {
+              window.__realRaf = requestAnimationFrame;
+              window.requestAnimationFrame = () => 0;
+              lastInteraction = performance.now();
+              S.spin.lam = 6; S.spin.phi = 0; needGlobe = true;
+              window.__lam0 = S.rot.lam;
+            }""")
+            page.wait_for_timeout(1200)
+            fb = page.evaluate("({ms: beatMs, raf: rafIsLive(),"
+                               " moved: Math.abs(S.rot.lam - __lam0)})")
+            page.evaluate("window.requestAnimationFrame = window.__realRaf;"
+                          " S.spin.lam = 0; requestAnimationFrame(frame);")
+            page.wait_for_timeout(300)
+            report.check("the beat still drives animation when rAF stops",
+                         not fb["raf"] and fb["ms"] <= 20 and fb["moved"] > 5,
+                         f"{fb['moved']:.0f} degrees of spin at {fb['ms']}ms with rAF dead")
+
         # ------------------------------------------------------- the corpus
         counts = page.evaluate("""() => {
           const r = q();

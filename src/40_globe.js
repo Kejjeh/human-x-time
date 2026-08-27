@@ -403,54 +403,13 @@ function drawLandRing(ring, orientation) {
   return true;
 }
 
-/* --------------------------------------------------------------- great arcs */
-function arcPoints(a, b, steps) {
-  let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  dot = Math.max(-1, Math.min(1, dot));
-  const om = Math.acos(dot), so = Math.sin(om);
-  const pts = new Float64Array(steps * 3);
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    let c1, c2;
-    if (so < 1e-6) { c1 = 1 - t; c2 = t; }
-    else { c1 = Math.sin((1 - t) * om) / so; c2 = Math.sin(t * om) / so; }
-    pts[i * 3] = a[0] * c1 + b[0] * c2;
-    pts[i * 3 + 1] = a[1] * c1 + b[1] * c2;
-    pts[i * 3 + 2] = a[2] * c1 + b[2] * c2;
-  }
-  return pts;
-}
-
-/** Draw an arc raised off the surface; returns screen points for the travelling dot. */
-function drawArc(pts, lift, color, width, dash, dashOffset) {
-  const n = pts.length / 3;
-  gx.strokeStyle = color; gx.lineWidth = width;
-  if (dash) { gx.setLineDash(dash); gx.lineDashOffset = dashOffset || 0; }
-  const screen = new Float64Array(n * 2);
-  const vis = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1);
-    const h = 1 + lift * Math.sin(Math.PI * t);
-    const px = pts[i * 3], py = pts[i * 3 + 1], pz = pts[i * 3 + 2];
-    const d = M[0] * px + M[1] * py + M[2] * pz;
-    const yv = M[3] * px + M[4] * py + M[5] * pz;
-    const zv = M[6] * px + M[7] * py + M[8] * pz;
-    screen[i * 2] = GCX + GR * h * yv;
-    screen[i * 2 + 1] = GCY - GR * h * zv;
-    vis[i] = d > -(h - 1) * 0.9 ? 1 : 0;
-  }
-  let drawing = false;
-  gx.beginPath();
-  for (let i = 0; i < n; i++) {
-    if (vis[i]) {
-      if (!drawing) { gx.moveTo(screen[i * 2], screen[i * 2 + 1]); drawing = true; }
-      else gx.lineTo(screen[i * 2], screen[i * 2 + 1]);
-    } else drawing = false;
-  }
-  gx.stroke();
-  gx.setLineDash([]);
-  return { screen, vis, n };
-}
+/* The great-arc helpers came over with the globe from the sibling site, where
+   arcs connect a claim to the evidence for it. Nothing here draws one - this
+   site's marks are points, not relations - so arcPoints, drawArc and the
+   arcPhase accumulator drawGlobe was advancing every frame are gone, along with
+   ON_IMAGERY, which was assigned once a frame and never read. Same reason
+   drawMarker and drawLabel went: unreachable code that still has to be read,
+   and in drawMarker's case would have resolved markerRadius to the wrong one.
 
 /* ------------------------------------------------------------------ markers */
 /* Hit targets are parallel typed arrays in 45_markers.js and are rebuilt inside
@@ -463,18 +422,15 @@ function drawArc(pts, lift, color, width, dash, dashOffset) {
    so it would have drawn the wrong size the moment anything did call it. */
 
 /* ------------------------------------------------------------------- render */
-let arcPhase = 0;
-let ON_IMAGERY = false;
-let LAST_INPUT_AT = -1e9;   // set by the input handlers; see paintOnInput   // label scrims darken over satellite imagery
+let LAST_INPUT_AT = -1e9;   // set by the input handlers; see paintOnInput
 
-function drawGlobe(dt) {
+function drawGlobe() {
   buildMatrix();
   gx.clearRect(0, 0, GW, GH);
 
   const moving = !!gDrag || Math.abs(S.spin.lam) > 0.01 || Math.abs(S.spin.phi) > 0.01
     || (performance.now() - LAST_INPUT_AT) < 170;
   const satellite = S.basemap === 'satellite' && TEX.ready;
-  ON_IMAGERY = satellite;
 
   if (satellite) {
     paintAtmosphere();
@@ -516,6 +472,4 @@ function drawGlobe(dt) {
   gx.lineWidth = 1; gx.stroke();
 
   drawEvents();
-
-  if (!RM.matches) arcPhase += dt;
 }

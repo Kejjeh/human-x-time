@@ -428,7 +428,7 @@ function render(dt) {
     needGlobe = true;
   }
 
-  if (needGlobe) { drawGlobe(dt); needGlobe = false; }
+  if (needGlobe) { drawGlobe(); needGlobe = false; }
   if (needChron) { drawChron(); needChron = false; }
   if (needRail) { drawRail(); needRail = false; }
   if (needPanel) {
@@ -502,6 +502,9 @@ function scheduleSharpen() {
 function paintOnInput() {
   LAST_INPUT_AT = performance.now();
   lastInteraction = LAST_INPUT_AT;
+  // A hidden tab has no rAF, so the beat is the only clock the inertia after
+  // this gesture will have. Do not make it wait out the watch interval.
+  if (!rafIsLive()) beatRate(BEAT_FAST);
   scheduleSharpen();
   writeHash();                    // debounced; the URL settles when the gesture does
   if (painting || rafIsLive()) return;
@@ -531,9 +534,32 @@ function paintOnInput() {
    tab is driven by rAF exactly as before, and it stops rendering after two
    minutes without input so a genuinely backgrounded tab is not animated for
    nobody. If the host's CSP forbids blob workers it degrades to what we had. */
-let beat = null;
+/* The beat has a rate, and standing down means slowing the clock - not just
+   returning from the handler.
+ *
+ * The note above says "the beat stands down the moment rAF starts working". The
+ * handler did; the worker did not. It posted every 16ms for the life of the
+ * page whatever happened - measured at 125 messages in two seconds with rAF
+ * live and doing all the real work, and another 125 in two seconds after the
+ * two-minute idle cutoff that is supposed to stop it. Every one is a main-
+ * thread task dispatch that reads a clock and returns.
+ *
+ * It cannot stop outright: something has to notice when rAF dies, and rAF
+ * cannot report its own death. So it ticks twice a second while rAF is healthy,
+ * once a second when the tab has been idle for two minutes, and at 60Hz only
+ * when it is actually the clock. Worst case a hidden tab waits 500ms before the
+ * fast rate resumes, so paintOnInput asks for it directly - input already
+ * paints from the handler, and the beat only drives self-animation. */
+let beat = null, beatMs = 0;
 let lastInteraction = performance.now();
 const BEAT_IDLE_MS = 120000;
+const BEAT_FAST = 16, BEAT_WATCH = 500, BEAT_IDLE = 1000;
+
+function beatRate(ms) {
+  if (!beat || ms === beatMs) return;
+  beatMs = ms;
+  try { beat.postMessage(ms); } catch (_) { /* worker gone; nothing to do */ }
+}
 
 function isAnimating() {
   if (RM.matches) return false;
@@ -543,8 +569,9 @@ function isAnimating() {
 }
 
 function onBeat() {
-  if (rafIsLive()) return;                       // the real loop is back
-  if (performance.now() - lastInteraction > BEAT_IDLE_MS) return;
+  if (rafIsLive()) { beatRate(BEAT_WATCH); return; }   // the real loop is back
+  if (performance.now() - lastInteraction > BEAT_IDLE_MS) { beatRate(BEAT_IDLE); return; }
+  beatRate(BEAT_FAST);
   const dirty = needGlobe || needChron || needRail || needPanel;
   if (!dirty && !isAnimating()) return;
   const now = performance.now();
@@ -557,10 +584,14 @@ function onBeat() {
 function startHeartbeat() {
   if (beat) return;
   try {
-    const url = URL.createObjectURL(new Blob(
-      ['setInterval(function(){postMessage(0)},16);'], { type: 'text/javascript' }));
+    const url = URL.createObjectURL(new Blob([
+      'var id=setInterval(function(){postMessage(0)},16);' +
+      'onmessage=function(e){clearInterval(id);var ms=e.data|0;' +
+      'id=ms>0?setInterval(function(){postMessage(0)},ms):null;};'
+    ], { type: 'text/javascript' }));
     beat = new Worker(url);
     URL.revokeObjectURL(url);
+    beatMs = BEAT_FAST;
     beat.onmessage = onBeat;
   } catch (_) {
     beat = null;                                  // CSP may forbid it; carry on
