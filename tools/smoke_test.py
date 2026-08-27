@@ -505,6 +505,44 @@ def run(url, headed, report):
                          reach["inQuery"] and reach["selected"],
                          f"{reach['name']!r} at floor {reach['floor']}")
 
+        # The time axis is a focusable role="slider" and answered no key at all -
+        # worse than not being focusable, because it advertises an affordance it
+        # does not have. The rail beside it has handled six keys all along.
+        kb = page.evaluate("""() => {
+          const key = k => ccv.dispatchEvent(
+            new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
+          const span = () => S.win.t1 - S.win.t0;
+          const out = {};
+          setWindow(500, 3500); drawChron(); const t1 = S.win.t1;
+          key('ArrowRight'); drawChron(); out.right = S.win.t1 < t1;
+          setWindow(500, 3500); drawChron(); const t1b = S.win.t1;
+          key('ArrowLeft'); drawChron(); out.left = S.win.t1 > t1b;
+          setWindow(0, 3200); drawChron(); const s0 = span();
+          key('ArrowUp'); drawChron(); out.zoomIn = span() < s0;
+          setWindow(0, 3200); drawChron(); const s1 = span();
+          key('ArrowDown'); drawChron(); out.zoomOut = span() > s1;
+          setWindow(0, 3200); key('Home'); out.home = S.win.t1 >= T_MAX * 0.99;
+          setWindow(0, 3200); key('End'); out.end = S.win.t1 < 200;
+          setWindow(0, 3200); drawChron();
+          return out;
+        }""")
+        report.check("the time axis answers the keyboard",
+                     all(kb.values()),
+                     ", ".join(k for k, v in kb.items() if not v) or
+                     "pan, zoom, Home and End all respond")
+
+        # aria-valuenow alone is a bare number in a unit nothing on screen uses.
+        vt = page.evaluate("""() => {
+          setCoverage(40); setWindow(0, 3200); invalidate(); renderNow();
+          return { rail: rcv.getAttribute('aria-valuetext'),
+                   chron: ccv.getAttribute('aria-valuetext') };
+        }""")
+        report.check("both sliders announce their value in words",
+                     bool(vt["rail"]) and bool(vt["chron"]) and
+                     any(c.isalpha() for c in vt["rail"] or "") and
+                     any(c.isalpha() for c in vt["chron"] or ""),
+                     f"rail {vt['rail']!r}, axis {vt['chron']!r}")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")
