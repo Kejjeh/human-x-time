@@ -21,6 +21,29 @@ def read(p):
         return f.read()
 
 
+def embed_json(obj):
+    r"""Serialise for pasting inside a <script> tag.
+
+    The corpus is Wikidata's labels, and a label is whatever somebody typed. A
+    name containing a closing script tag ends the tag early and the rest of the
+    page becomes markup - so the build refused to run at all when one appeared,
+    which is safe and is also a build that cannot be made to work without
+    hand-editing the data. Escaping is the fix that refusal was standing in for:
+    <, > and & become \uXXXX escapes, which JSON decodes back to exactly the
+    same characters, so the payload is inert to anything reading the document as
+    HTML and identical once parsed.
+
+    U+2028 and U+2029 go the same way. They are legal inside a string literal
+    from ES2019 and line terminators before it, and ensure_ascii=False emits
+    them raw.
+    """
+    out = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
+                    ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        out = out.replace(ch, esc)
+    return out
+
+
 def main():
     # check_no_local_paths documents --all as "what you want from CI or a build
     # gate" and nothing ran it: the only thing standing between a leaked home
@@ -88,15 +111,26 @@ def main():
     js = js.replace("/*@LAND@*/", land)
     js = js.replace("/*@PLATES@*/", plates)
     js = js.replace("/*@EARTH@*/", earth)
-    js = js.replace("/*@EVENTS@*/", json.dumps(events, separators=(",", ":"), ensure_ascii=False))
+    js = js.replace("/*@EVENTS@*/", embed_json(events))
 
     # Nothing may reach the browser with a placeholder still in it.
     inner = head + "\n" + body + '\n<script>\n' + js + '\n</script>\n'
     left = re.findall(r"/\*@[A-Z]+@\*/", inner)
     if left:
         sys.exit(f"FATAL: unsubstituted placeholders remain: {set(left)}")
+    # A backstop, not the mechanism: embed_json has already escaped every < > &
+    # in the payload, so this can only fire if the source files themselves carry
+    # a closing tag.
     if re.search(r"</script", js, re.I):
         sys.exit("FATAL: a literal </script> inside the JS payload would close the tag early")
+
+    # And the invariant embed_json exists for, asserted rather than assumed: the
+    # corpus payload reaches the document with nothing in it that an HTML parser
+    # would treat as markup.
+    payload = embed_json(events)
+    stray = {c for c in "<>&\u2028\u2029" if c in payload}
+    if stray:
+        sys.exit(f"FATAL: the corpus payload still carries {sorted(stray)!r} unescaped")
 
     # The artifact host supplies its own <head>, so drop our meta tags there and
     # keep only <title> (which the publisher reads) plus the inlined styles.
