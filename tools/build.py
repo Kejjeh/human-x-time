@@ -42,6 +42,14 @@ def main():
     if bad:
         sys.exit(f"FATAL: the packed corpus does not round-trip ({bad} mismatches)")
 
+    # The client builds the language lens as `LANG_BIT[l] = 1 << i`. Past 32
+    # editions that shift wraps - bit 32 aliases bit 0 - and the lens would
+    # quietly answer for the wrong language rather than fail. The ingest caps
+    # the vocabulary at 32; this is the gate that says so out loud if it stops.
+    if len(events["langs"]) > 32:
+        sys.exit(f"FATAL: {len(events['langs'])} language editions; the client's "
+                 f"32-bit coverage mask cannot address more than 32")
+
     # The encoding alphabet excludes quote, backslash and angle brackets, so the
     # payloads drop into a JS string literal untouched. Assert it rather than hope.
     for name, blob in (("land", land), ("plates", plates)):

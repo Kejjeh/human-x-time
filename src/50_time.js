@@ -57,18 +57,30 @@ function drawBandLane(sc, rows, y, h, dark) {
   }
 }
 
-/* Histogram of surviving events per column — the shape of the record. */
+/* Histogram of surviving events per column — the shape of the record.
+
+   Walks the typed columns through F.idx, the way drawEvents does, rather than
+   the EV objects. Same reason: at the coverage floor of 1 with the window at
+   maximum this is 38,242 iterations, and it runs on every state change, which
+   during a rail drag is every frame. The object walk cost a property load per
+   event and - worse - a THEMES.indexOf per event, a linear scan to recover a
+   number EVTH already holds. */
 function drawHistogram(sc, yTop, h) {
   const F = q();
   const cols = Math.max(40, Math.floor(CW / 4));
   const bins = new Float64Array(cols);
+  const nTh = THEMES.length;
   const binsTheme = THEMES.map(() => new Float64Array(cols));
-  for (const e of F.events) {
-    const x = sc.x(e.t);
+  const idx = F.idx, N = F.n;
+  const invW = cols / CW;
+  for (let k = 0; k < N; k++) {
+    const i = idx[k];
+    const x = sc.x(EVT[i]);
     if (x < 0 || x >= CW) continue;
-    const b = Math.min(cols - 1, Math.floor(x / CW * cols));
+    const b = Math.min(cols - 1, Math.floor(x * invW));
     bins[b]++;
-    binsTheme[THEMES.indexOf(e.theme)][b]++;
+    const ti = EVTH[i];
+    if (ti < nTh) binsTheme[ti][b]++;
   }
   let max = 0; for (const v of bins) max = Math.max(max, v);
   if (max <= 0) {
