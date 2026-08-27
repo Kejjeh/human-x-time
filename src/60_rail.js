@@ -20,25 +20,41 @@ function resizeRail() {
 
 /* Sitelink counts are heavy-tailed — half the corpus sits under 27 editions and
    the top is near 300 — so the rail is logarithmic or the whole scale is spent
-   on a handful of capitals. */
+   on a handful of capitals.
+
+   The floor reaches ZERO, not one. Four events in the corpus are carried by no
+   Wikipedia edition anywhere - a Wikidata item, a date, a coordinate, and
+   silence - and a floor of 1 excluded every one of them from every view the
+   site can produce. They are the site's own thesis at its limit, and they were
+   the only events it could not show. The log scale cannot distinguish them
+   anyway: railU(0) and railU(1) are both 0, the same pixel, so admitting zero
+   costs nothing on screen and stops the header advertising 38,242 events of
+   which 38,238 are reachable. */
 const railU = n => Math.log(Math.max(1, n));
 const RAIL_MAX = () => railU(MAX_SL);
 function slToY(n) { return RPAD + (1 - railU(n) / RAIL_MAX()) * (RH - RPAD * 2); }
 function yToSl(y) {
   const f = 1 - (y - RPAD) / (RH - RPAD * 2);
-  return Math.round(Math.exp(Math.max(0, Math.min(1, f)) * RAIL_MAX()));
+  // Strictly below the track, not at its last pixel: railU(0) and railU(1) are
+  // both 0, so the bottom of the scale has to keep meaning 1 or a floor of 1
+  // stops being selectable by dragging. Past the end - into the foot padding,
+  // which the pointer can reach - means no floor at all.
+  if (f < 0) return 0;
+  return Math.round(Math.exp(Math.min(1, f) * RAIL_MAX()));
 }
 
-/* How many events survive each coverage floor, precomputed once. */
+/* How many events survive each coverage floor, precomputed once.
+   Down to zero, so the bottom of the rail counts the events no edition carries
+   rather than quietly dropping them out of the total. */
 const SURVIVORS = (() => {
   const counts = new Array(MAX_SL + 2).fill(0);
-  for (const e of EV) counts[Math.min(e.sl, MAX_SL)]++;
+  for (const e of EV) counts[Math.max(0, Math.min(e.sl, MAX_SL))]++;
   const cum = new Array(MAX_SL + 2).fill(0);
   let run = 0;
-  for (let n = MAX_SL; n >= 1; n--) { run += counts[n]; cum[n] = run; }
+  for (let n = MAX_SL; n >= 0; n--) { run += counts[n]; cum[n] = run; }
   return cum;
 })();
-const survivorsAt = n => SURVIVORS[Math.max(1, Math.min(MAX_SL, n))] || 0;
+const survivorsAt = n => SURVIVORS[Math.max(0, Math.min(MAX_SL, n))] || 0;
 
 function drawRail() {
   rx.clearRect(0, 0, RW, RH);

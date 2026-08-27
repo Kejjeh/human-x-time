@@ -48,7 +48,7 @@ English article**, against 241 in the first cut.
 
 | | |
 |---|---|
-| Drag the right-hand rail to the bottom | 2,183 events become 38,242. Europe fills in first and hardest. |
+| Drag the right-hand rail past the bottom | 2,183 events become 38,242 — all of them, including four no Wikipedia edition anywhere carries. Europe fills in first and hardest. |
 | Set the lens to **Missing from en.wikipedia** | 7,387 events the anglophone record does not carry. |
 | Watch the histogram | The record thickens toward the present — that is survivorship, not history. |
 | Compare Europe with Central Asia at any coverage floor | The unevenness is the point. |
@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 53 checks, wired into the build as a gate. The sibling
+outside, whether it works — 56 checks, wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
