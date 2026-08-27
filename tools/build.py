@@ -37,7 +37,10 @@ def main():
     # src/events.json stays readable and reviewable in the diff; only the browser
     # gets the columnar form. See tools/pack_events.py.
     import pack_events
-    events = pack_events.pack(source)
+    try:
+        events = pack_events.pack(source)
+    except ValueError as err:
+        sys.exit(f"FATAL: {err}")
     bad = pack_events.verify(source, events)
     if bad:
         sys.exit(f"FATAL: the packed corpus does not round-trip ({bad} mismatches)")

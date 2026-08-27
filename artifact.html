@@ -1778,6 +1778,14 @@ const elDetail = document.getElementById('detail');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/* Language codes and theme keys come from the corpus, which comes from
+   Wikidata, and they used to go into innerHTML raw. In practice a sitelink
+   dbname is [a-z0-9_] and no attack survives that - but every other
+   interpolation in this file is escaped, the corpus is a third party's data,
+   and a code of `x"><img src=x onerror=...>` put a live element into both the
+   lens dropdown and the detail panel when it was tried. Nothing here is
+   trusted markup. Event names, QIDs and palette values go the same way. */
+
 function langList(e) {
   const have = [], missing = [];
   for (const l of LANGS) ((e.m & LANG_BIT[l]) ? have : missing).push(l);
@@ -1819,10 +1827,10 @@ function renderDetail() {
         <strong>Nothing selected</strong>
         Click a marker. Clusters split as you zoom the globe.
         ${top.length ? `<p style="margin-top:14px"><strong>Most widely remembered here</strong></p>
-          <ol>${top.map(e => `<li><button class="pick" data-q="${e.q}">${esc(e.n)}</button>
+          <ol>${top.map(e => `<li><button class="pick" data-q="${esc(e.q)}">${esc(e.n)}</button>
             <span class="num" style="color:var(--chalk-faint)"> ${fmtYear(e.y)} · ${e.sl} langs</span></li>`).join('')}</ol>` : ''}
         ${thin.length ? `<p style="margin-top:14px"><strong>In this window, but not on English Wikipedia</strong></p>
-          <ol>${thin.map(e => `<li><button class="pick" data-q="${e.q}">${esc(e.n)}</button>
+          <ol>${thin.map(e => `<li><button class="pick" data-q="${esc(e.q)}">${esc(e.n)}</button>
             <span class="num" style="color:var(--chalk-faint)"> ${fmtYear(e.y)} · ${e.sl} langs</span></li>`).join('')}</ol>` : ''}
       </div>`;
     return;
@@ -1837,7 +1845,7 @@ function renderDetail() {
 
   elDetail.innerHTML = `
     <div class="dt-head">
-      <span class="tag" style="color:${CSSV[e.theme]};border-color:${withAlpha(CSSV[e.theme], .45)}">
+      <span class="tag" style="color:${esc(CSSV[e.theme])};border-color:${esc(withAlpha(CSSV[e.theme], .45))}">
         ${esc(CAT_LABEL[e.c] || e.c)}</span>
       <h2>${esc(e.n)}</h2>
       <div class="when num">${fmtYear(e.y)}</div>
@@ -1849,8 +1857,8 @@ function renderDetail() {
       <div class="num" style="font-size:15px;color:var(--amber)">${e.sl} language editions</div>
       <div class="langbar"><i style="width:${pct}%"></i></div>
       <div class="langs">
-        ${have.map(l => `<span>${l}</span>`).join('')}
-        ${missing.slice(0, 12).map(l => `<span class="miss">${l}</span>`).join('')}
+        ${have.map(l => `<span>${esc(l)}</span>`).join('')}
+        ${missing.slice(0, 12).map(l => `<span class="miss">${esc(l)}</span>`).join('')}
       </div>
       <p class="hint">Struck-through codes are major editions with no article on this.
         ${!(e.m & LANG_BIT.en) ? '<b style="color:var(--amber)">No English article.</b>' : ''}</p>
@@ -1859,7 +1867,7 @@ function renderDetail() {
     <div class="sect">
       <span class="lbl">Source</span>
       <p class="srcline">
-        <a href="https://www.wikidata.org/wiki/${e.q}" target="_blank" rel="noopener">Wikidata ${e.q}</a>
+        <a href="https://www.wikidata.org/wiki/${esc(e.q)}" target="_blank" rel="noopener">Wikidata ${esc(e.q)}</a>
         — date and coordinates as recorded there.
       </p>
       <p class="hint">This site cites the encyclopedia, not a primary source per row.
@@ -1869,7 +1877,7 @@ function renderDetail() {
 
     ${near.length ? `<div class="sect nearby">
       <span class="lbl">Nearest in time</span>
-      ${near.map(x => `<button class="pick" data-q="${x.q}">
+      ${near.map(x => `<button class="pick" data-q="${esc(x.q)}">
         <span class="y num">${fmtYear(x.y)}</span>
         <span class="t">${esc(x.n)}</span></button>`).join('')}
     </div>` : ''}`;
@@ -1878,10 +1886,10 @@ function renderDetail() {
 function renderThemes() {
   const F = q();
   document.getElementById('themes').innerHTML = THEMES.map(t => `
-    <button class="theme" data-theme="${t}" data-on="${S.themes.has(t)}"
+    <button class="theme" data-theme="${esc(t)}" data-on="${S.themes.has(t)}"
             aria-pressed="${S.themes.has(t)}">
-      <span class="sw" style="--c:${CSSV[t]}"></span>
-      <span>${THEME_LABEL[t]}</span>
+      <span class="sw" style="--c:${esc(CSSV[t])}"></span>
+      <span>${esc(THEME_LABEL[t] || t)}</span>
       <span class="n">${F.themeCounts[t] || 0}</span>
     </button>`).join('');
 }
@@ -1892,9 +1900,9 @@ function renderLens() {
   sel.dataset.built = '1';
   const opts = ['<option value="">Every edition</option>'];
   for (const l of LANGS.slice(0, 16))
-    opts.push(`<option value="not:${l}">Missing from ${l}.wikipedia</option>`);
+    opts.push(`<option value="not:${esc(l)}">Missing from ${esc(l)}.wikipedia</option>`);
   for (const l of LANGS.slice(0, 16))
-    opts.push(`<option value="only:${l}">Present in ${l}.wikipedia</option>`);
+    opts.push(`<option value="only:${esc(l)}">Present in ${esc(l)}.wikipedia</option>`);
   sel.innerHTML = opts.join('');
 }
 

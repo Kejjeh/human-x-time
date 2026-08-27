@@ -35,9 +35,26 @@ SRC = os.path.join(ROOT, "src", "events.json")
 ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-"
 
 
+# The browser decodes every column into a Uint32Array, building each value with
+# `res |= (b & 0x1f) << shift`. JavaScript takes that shift modulo 32, so a
+# value needing a 35-bit shift is shifted by 3 instead and decodes as something
+# else entirely - measured in Chromium: 2**32 comes back as 0, 2**33 as 0, and
+# 10**11 as 1,215,752,208. src/20_core.js states the ceiling in a comment and
+# nothing enforced it, and verify() below could not: it decodes in Python, where
+# integers are arbitrary precision, so it reported a clean round-trip for a
+# payload the page would read as zero. Refuse at the point of encoding.
+MAX_COL_VALUE = 1 << 32
+
+
 def varint(n, out):
     """Base-64 varint, low 5 bits per character, bit 0x20 = 'more follows'."""
-    assert n >= 0, n
+    if n < 0:
+        raise ValueError(f"cannot varint a negative value: {n}")
+    if n >= MAX_COL_VALUE:
+        raise ValueError(
+            f"{n:,} does not fit the 32-bit column format: the browser decodes "
+            f"into a Uint32Array and would read it as "
+            f"{n & 0xFFFFFFFF if n >> 32 == 0 else 'a wrapped value'}, not {n:,}")
     while True:
         b = n & 0x1F
         n >>= 5
