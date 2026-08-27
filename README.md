@@ -84,9 +84,16 @@ an absolute path out of somebody's home directory — `C:\Users\…`, `/Users/�
 `/home/…`. It exists because one nearly shipped in
 `docs/ux-review-2026-08-03.md`, written by an agent that had been handed
 absolute paths in its brief; it was caught by hand, which is not a control.
-Obvious placeholders (`/home/you/…`) still pass. The hook is versioned in
-`.githooks/` so it is reviewable in the diff; a fresh clone arms it once with
-`git config core.hooksPath .githooks`.
+Obvious placeholders (`/home/you/…`) still pass, in any case. The hook is
+versioned in `.githooks/` so it is reviewable in the diff; a fresh clone arms it
+once with `git config core.hooksPath .githooks` — and because that is a step a
+fresh clone can forget, `tools/build.py` runs the same check over every tracked
+file before it writes anything. The patterns have a test of their own
+(`--self-test`, sixteen cases, also run by the build), because a gate nobody
+tests is a gate nobody knows the shape of: matching used to be case-sensitive,
+so three of those sixteen — a lowercased Windows path, an uppercased one, a
+lowercased macOS one — walked straight through, along with anything reached
+through a WSL or git-bash drive mount.
 
 The globe is carried over intact from Earth × Time: canvas 2D, hand-written
 orthographic projection, NASA Blue Marble inlined, no WebGL. Rendering paints

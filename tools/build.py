@@ -22,6 +22,16 @@ def read(p):
 
 
 def main():
+    # check_no_local_paths documents --all as "what you want from CI or a build
+    # gate" and nothing ran it: the only thing standing between a leaked home
+    # directory and a public repo was a pre-commit hook a fresh clone has to arm
+    # by hand. It costs about a second over 4.9 MB of tracked text.
+    import check_no_local_paths
+    if check_no_local_paths.self_test():
+        sys.exit("FATAL: the local-path patterns do not behave as documented")
+    if check_no_local_paths.main(["", "--all"]):
+        sys.exit("FATAL: an absolute home-directory path is tracked - see above")
+
     head = read(os.path.join(SRC, "00_head.html"))
     body = read(os.path.join(SRC, "10_body.html"))
     js = "\n".join(read(os.path.join(SRC, n)) for n in sorted(os.listdir(SRC))
