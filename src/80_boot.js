@@ -10,10 +10,33 @@ function setCoverage(n) {
   if (v === S.kt) return;
   S.kt = v; changed();
 }
+/* The narrowest window the axis will hold. */
+const MIN_SPAN = 20;
+
+/* At the floor, grow about the MIDPOINT.
+ *
+ * This used to clamp the span and then rebuild the window as [t0, t0 + span] -
+ * keeping the left edge and letting the right one run. Zoom-to-cursor holds
+ * exactly until the requested span drops under 20 years, and from that scroll
+ * on the window stops shrinking and starts sliding: traced at the wheel, the
+ * year under the cursor sat at 276.49 for 27 straight steps and then began to
+ * creep, and forty steps in the point being zoomed toward was 28 years outside
+ * the window entirely. A zoom that has hit its limit should stop, not pan.
+ *
+ * A reversed pair is ordered rather than read as a 20-year window at t0, which
+ * is what max(20, t1 - t0) turned it into. */
 function setWindow(t0, t1) {
-  const span = Math.max(20, Math.min(T_MAX, t1 - t0));
-  let a = Math.max(0, t0), b = a + span;
-  if (b > T_MAX) { b = T_MAX; a = Math.max(0, b - span); }
+  if (t1 < t0) { const swap = t0; t0 = t1; t1 = swap; }
+  let span = t1 - t0;
+  if (span < MIN_SPAN) {
+    const mid = (t0 + t1) / 2;
+    t0 = mid - MIN_SPAN / 2; t1 = mid + MIN_SPAN / 2; span = MIN_SPAN;
+  } else if (span > T_MAX) {
+    t0 = 0; t1 = T_MAX; span = T_MAX;
+  }
+  let a = t0, b = t1;
+  if (a < 0) { a = 0; b = span; }                 // shift, the way a drag does
+  if (b > T_MAX) { b = T_MAX; a = T_MAX - span; }
   S.win.t0 = a; S.win.t1 = b; changed();
 }
 function setSelection(qid) { S.selection = qid; changed(); }
