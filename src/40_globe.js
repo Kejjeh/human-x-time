@@ -35,7 +35,17 @@ const TEX = { w: 0, h: 0, data: null, ready: false };
 
 /* Ray directions for the disc, in the *unrotated* view frame. Depends only on
    canvas geometry, so it is rebuilt on resize and reused every frame. */
-const RAY = { scale: 0, w: 0, h: 0, nz: null, nx: null, ny: null, idx: null, buf: null, img: null };
+const RAY = { scale: 0, w: 0, h: 0, key: '', nz: null, nx: null, ny: null, idx: null, buf: null, img: null };
+
+/* The rays are unit directions built from the disc's centre and radius, so they
+   are only valid for the geometry they were built from. Testing the scale and
+   the width alone missed both of the ways that geometry moves without either
+   changing: a zoom (GR changes, GW does not) and a height-only window resize
+   (GH and GCY change, GW does not). Both left the imagery painted at the old
+   radius while the atmosphere, the limb, the graticule and every marker used
+   the new one - a photograph of Earth sitting still inside a limb ring that
+   grows. Key the cache on everything buildRays actually reads. */
+const rayKey = scale => `${scale}|${GW.toFixed(2)}x${GH.toFixed(2)}|${GCX.toFixed(2)},${GCY.toFixed(2)}|${GR.toFixed(3)}`;
 
 function buildRays(scale) {
   const w = Math.max(1, Math.round(GW * scale)), h = Math.max(1, Math.round(GH * scale));
@@ -55,7 +65,7 @@ function buildRays(scale) {
       k++;
     }
   }
-  RAY.scale = scale; RAY.w = w; RAY.h = h;
+  RAY.scale = scale; RAY.w = w; RAY.h = h; RAY.key = rayKey(scale);
   RAY.nz = nz; RAY.nx = nx; RAY.ny = ny; RAY.idx = idx; RAY.count = k;
   RAY.img = gx.createImageData(w, h);
   RAY.buf = new Uint32Array(RAY.img.data.buffer);
@@ -108,7 +118,7 @@ function movingScale() {
 function paintSatellite(scale) {
   if (!TEX.ready) return false;
   const _t0 = performance.now();
-  if (RAY.scale !== scale || RAY.w !== Math.round(GW * scale)) buildRays(scale);
+  if (RAY.key !== rayKey(scale)) buildRays(scale);
   const { nz, nx, ny, idx, buf, count } = RAY;
   const tw = TEX.w, th = TEX.h, td = TEX.data;
   const m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4],

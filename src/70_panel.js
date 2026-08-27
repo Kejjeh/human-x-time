@@ -11,15 +11,36 @@ function langList(e) {
   return { have, missing };
 }
 
+/* Bounded selection instead of a sort.
+   Every list in this panel is a top-six of a set that reaches 38,242 rows at
+   the coverage floor of 1 - and renderDetail runs once per state change, which
+   during a rail drag or a time-axis drag means once per frame. Three full sorts
+   of the visible set cost 17 ms there, on the frame path that the rest of this
+   codebase went to some trouble to keep under 12. A k-of-n insertion is one
+   pass with one comparison against the current floor in the common case, and k
+   is six. Same output, no allocation beyond the k slots. */
+function topK(items, k, better) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const e = items[i];
+    if (out.length === k && !better(e, out[k - 1])) continue;
+    let pos = out.length;
+    while (pos > 0 && better(e, out[pos - 1])) pos--;
+    out.splice(pos, 0, e);
+    if (out.length > k) out.pop();
+  }
+  return out;
+}
+const byCoverage = (a, b) => a.sl > b.sl;
+
 function renderDetail() {
   const F = q();
   if (!S.selection || !BY_Q[S.selection]) {
-    const top = F.events.slice().sort((a, b) => b.sl - a.sl).slice(0, 6);
-    // Sorted, not sliced raw: the corpus arrives in year order now, so an
+    const top = topK(F.events, 6, byCoverage);
+    // Ranked, not sliced raw: the corpus arrives in year order now, so an
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
-    const thin = F.events.filter(e => !(e.m & LANG_BIT.en))
-      .sort((a, b) => b.sl - a.sl).slice(0, 5);
+    const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
     elDetail.innerHTML = `
       <div class="empty">
         <strong>Nothing selected</strong>
@@ -38,10 +59,8 @@ function renderDetail() {
   const { have, missing } = langList(e);
   const pct = Math.round(100 * have.length / LANGS.length);
   // nearest in time, within the same window
-  const near = F.events
-    .filter(x => x.q !== e.q)
-    .sort((a, b) => Math.abs(a.y - e.y) - Math.abs(b.y - e.y))
-    .slice(0, 6);
+  const near = topK(F.events, 7, (a, b) => Math.abs(a.y - e.y) < Math.abs(b.y - e.y))
+    .filter(x => x.q !== e.q).slice(0, 6);
 
   elDetail.innerHTML = `
     <div class="dt-head">

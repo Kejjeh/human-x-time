@@ -165,6 +165,25 @@ gcv.addEventListener('pointercancel', e => {
   gDrag = null; gVel.length = 0;
   gcv.classList.remove('dragging');
 });
+/* The tooltip and the hover highlight are only ever cleared by a pointermove
+   that hits nothing. Move off the canvas entirely - onto the instrument panel,
+   the rail, or out of the window - and no such move ever arrives, so the tip
+   stays parked over the globe naming an event the cursor left behind, and
+   S.hover keeps that marker's label emphasised. Clear both on the way out. */
+function clearHover() {
+  const tip = document.getElementById('tip');
+  if (tip) tip.classList.remove('on');
+  gcv.style.cursor = '';
+  if (S.hover !== null) { S.hover = null; needGlobe = true; paintOnInput(); }
+}
+gcv.addEventListener('pointerleave', () => { if (!gDrag && !pinch) clearHover(); });
+gcv.addEventListener('pointerout', e => {
+  // pointerleave does not fire for a pointer that is removed (a lifted finger),
+  // and a capture released outside the element reports relatedTarget null.
+  if (!gDrag && !pinch && !e.relatedTarget) clearHover();
+});
+window.addEventListener('blur', clearHover);
+
 gcv.addEventListener('wheel', e => {
   e.preventDefault();
   setZoom(ZOOMF * (e.deltaY > 0 ? 0.92 : 1.087));
@@ -339,7 +358,6 @@ function render(dt) {
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();
     document.getElementById('rail-n').textContent = S.kt + '+';
-    const span = S.win.t1 - S.win.t0;
     document.getElementById('rd-window').textContent =
       S.win.t1 >= T_MAX * 0.99 ? 'all 75,000 years'
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
@@ -353,6 +371,7 @@ function render(dt) {
     document.getElementById('lens-hint').textContent = S.lens
       ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
       : 'Pick an edition to see what it does — or does not — cover.';
+    rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
     ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));
     needPanel = false;
