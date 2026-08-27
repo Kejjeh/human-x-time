@@ -13,6 +13,12 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
    lens dropdown and the detail panel when it was tried. Nothing here is
    trusted markup. Event names, QIDs and palette values go the same way. */
 
+/* The bar and the number above it were measuring different things.
+   `e.sl` counts every Wikipedia edition - some 340 of them - while the bar and
+   the codes below it are over LANGS, the 32 most-carried. So the Pyramid of
+   Menkaure read "45 language editions" above a bar at 100%, and Paris read 289
+   above a bar at 100%: six times the coverage, same picture, and nothing on
+   screen said the bar had a different denominator. The bar is captioned now. */
 function langList(e) {
   const have = [], missing = [];
   for (const l of LANGS) ((e.m & LANG_BIT[l]) ? have : missing).push(l);
@@ -81,8 +87,11 @@ function renderDetail() {
 
     <div class="sect">
       <span class="lbl">Who remembers it</span>
-      <div class="num" style="font-size:15px;color:var(--amber)">${e.sl} language editions</div>
+      <div class="num" style="font-size:15px;color:var(--amber)">${e.sl === 0
+        ? 'No Wikipedia article, in any edition'
+        : `${e.sl} language edition${e.sl === 1 ? '' : 's'}`}</div>
       <div class="langbar"><i style="width:${pct}%"></i></div>
+      <div class="barnote num">${have.length} of the ${LANGS.length} most-carried editions</div>
       <div class="langs">
         ${have.map(l => `<span>${esc(l)}</span>`).join('')}
         ${missing.slice(0, 12).map(l => `<span class="miss">${esc(l)}</span>`).join('')}

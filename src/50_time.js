@@ -21,15 +21,39 @@ function resizeChron() {
 }
 function chronScale() { return makeScale(S.win.t0, S.win.t1, CW); }
 
+/* 1, 2, 5 times a power of ten - the ladder that suits a logarithmic axis. */
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9))));
+  const n = raw / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+
+/* The decade ladder is right for a window spanning orders of magnitude, which is
+   what the asinh scale exists for. It is EMPTY for a narrow window that happens
+   to contain none of its rungs: [74,000, 75,000] and [11,990, 12,010] each
+   produced no labels at all - a time axis with no indication of what time it is
+   showing, reachable by zooming in anywhere in deep time. So when the ladder
+   comes up short, fall back to a linear nice step across the window. */
 function tickValues(t0, t1) {
   const out = [];
-  const p0 = Math.floor(Math.log10(Math.max(t0, 1))), p1 = Math.ceil(Math.log10(t1));
+  const p0 = Math.floor(Math.log10(Math.max(t0, 1))),
+        p1 = Math.ceil(Math.log10(Math.max(t1, 1)));
   for (let p = p0; p <= p1; p++)
     for (const m of [1, 2, 5]) {
       const v = m * Math.pow(10, p);
       if (v >= t0 && v <= t1) out.push(v);
     }
   if (t0 <= 0) out.push(0);
+
+  if (out.length < 3 && t1 > t0) {
+    const step = niceStep((t1 - t0) / 5);
+    const first = Math.ceil(t0 / step);
+    const last = Math.floor(t1 / step);
+    for (let i = first; i <= last; i++) {
+      const v = i * step;                      // multiply, never accumulate
+      if (out.indexOf(v) < 0) out.push(v);
+    }
+  }
   return out.sort((a, b) => b - a);
 }
 
@@ -113,12 +137,19 @@ function drawChron() {
 
   cx2.font = '400 9.5px xt-mono, monospace';
   let lastX = -999;
-  for (const t of tickValues(S.win.t0, S.win.t1)) {
+  const tv = tickValues(S.win.t0, S.win.t1);
+  for (let ti = 0; ti < tv.length; ti++) {
+    const t = tv[ti];
     const x = sc.x(t);
     if (x < 2 || x > CW - 2) continue;
     cx2.strokeStyle = withAlpha(CSSV['chalk-faint'], 0.3);
     cx2.beginPath(); cx2.moveTo(x, TICK_H - 5); cx2.lineTo(x, TICK_H); cx2.stroke();
-    const lab = fmtYbpLabel(t);
+    // How close this tick's nearest neighbour is decides how precise its label
+    // has to be; see fmtYbpLabel.
+    let gap = Infinity;
+    if (ti > 0) gap = Math.min(gap, Math.abs(t - tv[ti - 1]));
+    if (ti < tv.length - 1) gap = Math.min(gap, Math.abs(t - tv[ti + 1]));
+    const lab = fmtYbpLabel(t, isFinite(gap) ? gap : 0);
     const w = cx2.measureText(lab).width;
     if (x - w / 2 > lastX + 8 && x + w / 2 < CW - 2) {
       cx2.fillStyle = CSSV['chalk-faint'];

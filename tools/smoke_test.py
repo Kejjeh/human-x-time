@@ -586,6 +586,61 @@ def run(url, headed, report):
                      f"{lab['drawn']} labels drawn, {lab['over']} under an overlay"
                      + (f" (e.g. {lab['first']!r})" if lab["first"] else ""))
 
+        # The tick ladder is 1, 2, 5 times a power of ten - right for a window
+        # spanning orders of magnitude, and empty for a narrow one containing
+        # none of its rungs. [74,000, 75,000] and [11,990, 12,010] each drew a
+        # time axis with no labels at all. And once labelled, one decimal was
+        # not enough to tell 12,000 from 12,005: two ticks, one text.
+        ticks = page.evaluate("""() => {
+          const real = cx2.fillText.bind(cx2);
+          const seen = [];
+          cx2.fillText = function (t, x, y) { seen.push({t: String(t), f: cx2.font}); return real(t, x, y); };
+          const blank = [], dup = [];
+          for (const [a, b] of [[0, 20], [0, 130], [0, 3200], [0, 12000], [0, T_MAX],
+                                [74000, 75000], [11990, 12010], [500, 560],
+                                [30000, 31000], [2000, 2400], [6000, 6020]]) {
+            setWindow(a, b); invalidate(); seen.length = 0; drawChron();
+            const lab = seen.filter(s => /xt-mono/.test(s.f) && /9\.5px/.test(s.f)).map(s => s.t);
+            if (!lab.length) blank.push(`${a}-${b}`);
+            if (new Set(lab).size !== lab.length) dup.push(`${a}-${b}: ${lab.join(' ')}`);
+          }
+          cx2.fillText = real;
+          setWindow(0, 3200); invalidate();
+          return {blank, dup};
+        }""")
+        report.check("every window labels its time axis",
+                     not ticks["blank"],
+                     ("blank at " + ", ".join(ticks["blank"])) if ticks["blank"] else "all labelled")
+        report.check("no two ticks carry the same label",
+                     not ticks["dup"], "; ".join(ticks["dup"][:2]) or "all distinct")
+
+        # The bar and the number above it measure different things: e.sl counts
+        # every Wikipedia edition, the bar and the codes are over the top 32. The
+        # Pyramid of Menkaure read "45 language editions" over a bar at 100%.
+        bar = page.evaluate("""() => {
+          setCoverage(0); setWindow(0, T_MAX); invalidate();
+          let best = 0;
+          for (let i = 0; i < NEV; i++) if (EVSL[i] > EVSL[best]) best = i;
+          S.selection = EV[best].q; renderDetail();
+          const note = document.querySelector('#detail .barnote');
+          const num = document.querySelector('#detail .sect .num');
+          const one = (() => { for (let i = 0; i < NEV; i++) if (EVSL[i] === 1) return i; return -1; })();
+          let singular = null;
+          if (one >= 0) {
+            S.selection = EV[one].q; renderDetail();
+            singular = (document.querySelector('#detail .sect .num') || {}).textContent;
+          }
+          S.selection = null; renderDetail();
+          return { note: note && note.textContent.trim(),
+                   num: num && num.textContent.trim(), singular: singular && singular.trim() };
+        }""")
+        report.check("the coverage bar says what it is a fraction of",
+                     bool(bar["note"]) and "of the" in (bar["note"] or ""),
+                     f"{bar['num']!r} over {bar['note']!r}")
+        if bar["singular"]:
+            report.check("a single edition is not \"1 language editions\"",
+                         "1 language editions" not in bar["singular"], repr(bar["singular"]))
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")
