@@ -784,6 +784,53 @@ def run(url, headed, report):
                      ", ".join(f"{k} leaked" for k, v in inject.items() if v) or
                      "lens, themes, names and the panel all escape")
 
+        # A render that throws is caught so the loop survives it, and the canvas
+        # keeps its last good frame - so from out here nothing changes. Injecting
+        # a failure into drawEvents mid-session escaped nothing to window.onerror,
+        # left __BOOT_OK true, and left 1,997 distinct colours on the globe. The
+        # page counts render failures now; this is the check that reads the count.
+        live = page.evaluate("""() => {
+          let seed = 999;
+          const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+          const pick = a => a[(rnd() * a.length) | 0];
+          const colours = () => {
+            const c = document.createElement('canvas'); c.width = 80; c.height = 80;
+            const x = c.getContext('2d', {willReadFrequently: true});
+            x.drawImage(gcv, 0, 0, gcv.width, gcv.height, 0, 0, 80, 80);
+            const d = x.getImageData(0, 0, 80, 80).data, s = new Set();
+            for (let i = 0; i < d.length; i += 4) s.add((d[i] << 16) | (d[i+1] << 8) | d[i+2]);
+            return s.size;
+          };
+          const before = window.__RENDER_ERRS;
+          const acts = [
+            () => { S.rot.lam += rnd() * 120 - 60; needGlobe = true; },
+            () => setZoom(ZMIN + rnd() * (ZMAX - ZMIN)),
+            () => setCoverage((rnd() * 300) | 0),
+            () => setWindow(0, 20 + rnd() * (T_MAX - 20)),
+            () => { S.cluster = !S.cluster; needGlobe = true; },
+            () => { S.basemap = S.basemap === 'chart' ? 'satellite' : 'chart';
+                    SURF.key = ''; needGlobe = true; },
+            () => { S.showPlates = !S.showPlates; needGlobe = true; },
+            () => { S.lens = pick(['', 'not:en', 'only:zh']); },
+          ];
+          let minCol = Infinity;
+          for (let i = 0; i < 120; i++) {
+            pick(acts)(); invalidate(); needGlobe = true; renderNow();
+            if (i % 10 === 0) minCol = Math.min(minCol, colours());
+          }
+          S.basemap = 'satellite'; setZoom(0.86); setCoverage(40);
+          setWindow(0, 3200); S.lens = ''; S.cluster = true; S.showPlates = false;
+          invalidate(); needGlobe = true; renderNow();
+          return { errs: window.__RENDER_ERRS - before, minCol,
+                   first: window.__RENDER_ERR };
+        }""")
+        report.check("120 view states render without a caught failure",
+                     live["errs"] == 0,
+                     f"{live['errs']} render failures"
+                     + (f": {str(live['first'])[:70]}" if live["first"] else ""))
+        report.check("the globe stays drawn across every view state",
+                     live["minCol"] > 40, f"fewest colours seen: {live['minCol']}")
+
         # ------------------------------------------------------- the fuzz
         # A deterministic random walk over every control there is, checking the
         # invariants after every 25 steps. This is what found the unguarded
