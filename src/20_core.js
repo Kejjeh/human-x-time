@@ -198,7 +198,8 @@ const EVX = new Float32Array(NEV), EVYV = new Float32Array(NEV), EVZ = new Float
 const EVT = new Float32Array(NEV);          // years before present
 const EVSL = new Uint16Array(NEV);
 const EVTH = new Uint8Array(NEV);           // theme index; the frame path must not
-const EV = new Array(NEV);                  // do a string lookup per marker
+const EVM = new Uint32Array(NEV);           // do a string lookup per marker, and
+const EV = new Array(NEV);                  // queryEvents must not read an object
 
 (() => {
   const C = DATA.cols;
@@ -217,6 +218,7 @@ const EV = new Array(NEV);                  // do a string lookup per marker
     EVT[i] = PRESENT - year;
     EVSL[i] = dsl[i];
     EVTH[i] = THEME_IX[CAT_THEME[dc[i]]];
+    EVM[i] = dm[i];
     EV[i] = {
       i, q: 'Q' + dq[i], n: names[i], lat, lng, y: year,
       c: CATS[dc[i]], theme: CAT_THEME[dc[i]], sl: dsl[i], m: dm[i],

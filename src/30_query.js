@@ -5,12 +5,14 @@
    on the sibling site. Every renderer reads its output.
    ========================================================================== */
 
+/* Returns the mask bit and which way the test runs, rather than a closure over
+   an EV object - the walk below reads EVM, not e.m. */
 function lensTest(A) {
   if (!A.lens) return null;
   const [mode, lang] = A.lens.split(':');
   const bit = LANG_BIT[lang];
   if (!bit) return null;
-  return mode === 'only' ? (e => (e.m & bit) !== 0) : (e => (e.m & bit) === 0);
+  return { bit, want: mode === 'only' };
 }
 
 /* Returns both shapes on purpose. `idx` is what the per-frame globe code walks -
@@ -18,25 +20,47 @@ function lensTest(A) {
    touches an object. `events` is the same set as EV objects, for the panels and
    the histogram, which run once per state change and are far easier to read
    that way. */
+/* Scratch, allocated once.
+   `new Int32Array(NEV)` is 153 KB every call, and subarray keeps the whole
+   buffer alive, so a rail drag threw away 153 KB a frame plus an events array
+   that grew to 38,242 entries by repeated push. Everything else on this path
+   stopped allocating two commits ago; this was the last one that had not.
+   Both are reused. Nothing may hold a query result across an invalidate(),
+   which nothing does - QCACHE is the only reference and every consumer calls
+   q() fresh. */
+const QIDX = new Int32Array(NEV);
+const QOUT = [];
+const THEME_ON = new Uint8Array(64);       // A.themes as bits, so the walk does
+                                           // not hash a string per event
+
 function queryEvents(A) {
   const lens = lensTest(A);
-  const out = [];
-  const idx = new Int32Array(NEV);
+  const lensBit = lens ? lens.bit : 0, lensWant = lens ? lens.want : false;
+  const t0 = A.win.t0, t1 = A.win.t1, kt = A.kt;
+  const nTh = THEMES.length;
+  for (let t = 0; t < nTh; t++) THEME_ON[t] = A.themes.has(THEMES[t]) ? 1 : 0;
+
+  const out = QOUT; out.length = 0;
+  const idx = QIDX;
   let m = 0;
-  const themeCounts = {}; for (const t of THEMES) themeCounts[t] = 0;
+  const counts = new Uint32Array(nTh);
   let inWindow = 0, belowCoverage = 0, lensDropped = 0;
 
   for (let i = 0; i < NEV; i++) {
-    const e = EV[i];
-    if (e.t < A.win.t0 || e.t > A.win.t1) continue;
+    const t = EVT[i];
+    if (t < t0 || t > t1) continue;
     inWindow++;
-    if (e.sl < A.kt) { belowCoverage++; continue; }
-    if (lens && !lens(e)) { lensDropped++; continue; }
-    themeCounts[e.theme]++;
-    if (!A.themes.has(e.theme)) continue;
-    out.push(e);
+    if (EVSL[i] < kt) { belowCoverage++; continue; }
+    if (lensBit && ((EVM[i] & lensBit) !== 0) !== lensWant) { lensDropped++; continue; }
+    const th = EVTH[i];
+    counts[th]++;
+    if (!THEME_ON[th]) continue;
+    out.push(EV[i]);
     idx[m++] = i;
   }
+
+  const themeCounts = {};
+  for (let t = 0; t < nTh; t++) themeCounts[THEMES[t]] = counts[t];
   return { events: out, idx: idx.subarray(0, m), n: m,
            themeCounts, inWindow, belowCoverage, lensDropped, total: NEV };
 }

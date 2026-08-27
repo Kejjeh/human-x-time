@@ -7,12 +7,27 @@
 # Bypassing this with --no-verify is not a fix. If it fires, the path is real.
 set -e
 
-if command -v python >/dev/null 2>&1; then
-  PY=python
-elif command -v python3 >/dev/null 2>&1; then
+# python3 first, not `python`.
+#
+# On a machine where `python` is still a Python 2 - older macOS, a conda env, a
+# stale alias - this picked it, and the checker needs subprocess.run's
+# capture_output, which is 3.7. The hook then died with a traceback about a
+# keyword argument instead of saying anything about paths. It fails closed, so
+# nothing leaked, but the natural response to a hook that breaks for no visible
+# reason is `--no-verify`, and the note above is right that that is not a fix.
+if command -v python3 >/dev/null 2>&1; then
   PY=python3
+elif command -v python >/dev/null 2>&1; then
+  PY=python
 else
   echo "pre-commit: no python on PATH; cannot check for local paths." >&2
+  exit 1
+fi
+
+# Say so if the interpreter cannot run the checker, rather than letting it fail
+# with something that reads like a bug in the hook.
+if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)'; then
+  echo "pre-commit: $PY is too old; tools/check_no_local_paths.py needs Python 3.7+." >&2
   exit 1
 fi
 
