@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 41 checks, wired into the build as a gate. The sibling
+outside, whether it works — 43 checks, wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
@@ -133,8 +133,11 @@ live query.
   there to make them visible rather than to correct them.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
-- **A UX review found twelve more, none of them implemented.** Chief among them: a
-  tap on a marker shows nothing, because the tooltip never fires on touch and the
-  detail panel sits ~990px below the fold. See
+- **A UX review found twelve more.** The worst of them is fixed: a tap on a marker
+  used to show nothing at all, because the tooltip is driven by hover and a finger
+  never produces one. A tap now answers with the tooltip. The detail panel is still
+  the third grid row on a narrow layout — measured at y=1011 in an 855px viewport —
+  and still does not scroll itself into view when the selection changes. The rest
+  are unimplemented. See
   [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers this
   site and its sibling together.

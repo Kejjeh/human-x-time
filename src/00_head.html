@@ -243,10 +243,16 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .iconbtn:hover { background:var(--panel-3); color:var(--chalk); }
 .iconbtn[aria-pressed="true"] { background:var(--panel-3); color:var(--amber); border-color:var(--amber-d); }
 
-.tip { position:absolute; pointer-events:none; z-index:20; padding:6px 9px;
+/* left/top stay at 0 and the whole offset is a transform, deliberately.
+   An absolutely positioned shrink-to-fit box is capped by (containing block -
+   left), so writing the marker's x into `left` made the tip's own width depend
+   on where it was put: near the right edge it wrapped from 174x47 to 93x97.
+   Measure-then-place is then always one layout stale, and the clamp used the
+   wrong half-width. Anchored at 0 the width is stable and measured once. */
+.tip { position:absolute; left:0; top:0; pointer-events:none; z-index:20; padding:6px 9px;
   background:color-mix(in srgb, var(--panel) 94%, transparent); border:1px solid var(--rule);
-  border-radius:var(--r); font-size:11.5px; max-width:250px; transform:translate(-50%,-100%);
-  margin-top:-12px; box-shadow:0 6px 22px rgba(0,0,0,.45); opacity:0; transition:opacity .1s; }
+  border-radius:var(--r); font-size:11.5px; max-width:250px;
+  box-shadow:0 6px 22px rgba(0,0,0,.45); opacity:0; transition:opacity .1s; }
 .tip.on { opacity:1; }
 .tip .t { font-weight:600; display:block; }
 .tip .d { font-family:var(--font-data); font-size:10.5px; color:var(--chalk-dim); }

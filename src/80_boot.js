@@ -106,15 +106,46 @@ gcv.addEventListener('pointermove', e => {
   const best = hitTest(mx, my);
   const id = best ? best.id : null;
   if (id !== S.hover) { S.hover = id; needGlobe = true; paintOnInput(); }
-  const tip = document.getElementById('tip');
-  if (id && BY_Q[id]) {
-    const ev = BY_Q[id];
-    tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
-      best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
-    tip.style.left = best.x + 'px'; tip.style.top = best.y + 'px';
-    tip.classList.add('on'); gcv.style.cursor = 'pointer';
-  } else { tip.classList.remove('on'); gcv.style.cursor = ''; }
+  showTip(best);
+  gcv.style.cursor = id ? 'pointer' : '';
 });
+
+/* The tip, placed so it is actually on screen.
+ *
+ * It is 250px wide at most and used to be centred on the marker by CSS, so
+ * writing best.x straight into `left` put half of it outside .stage - which is
+ * overflow:hidden - for any marker within ~125px of an edge. On a phone the
+ * stage is 298px wide, so that is most of it; a marker at x=27 had its whole
+ * left half cut off. Same going up: a marker near the top pushed the box above
+ * y=0. Clamp to the stage on both axes, and flip below the marker when there is
+ * no room above.
+ *
+ * The box is anchored at left:0; top:0 and moved entirely by transform - see
+ * the note on .tip in the stylesheet. Writing `left` made the tip's own width
+ * depend on where it was put, so every measurement here was one layout stale.
+ *
+ * Measured before it is shown, not after: the element is opacity:0 rather than
+ * display:none, so it has layout either way and there is no visible jump. */
+function positionTip(tip, x, y) {
+  const w = tip.offsetWidth, h = tip.offsetHeight, pad = 6;
+  let px = x - w / 2;
+  px = w + pad * 2 > GW ? (GW - w) / 2 : Math.max(pad, Math.min(GW - w - pad, px));
+  let py = y - h - 12;
+  if (py < pad) py = y + 14;                       // no room above: sit below the marker
+  py = h + pad * 2 > GH ? pad : Math.max(pad, Math.min(GH - h - pad, py));
+  tip.style.transform = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
+}
+
+function showTip(best) {
+  const tip = document.getElementById('tip');
+  if (!tip) return;
+  const ev = best && BY_Q[best.id];
+  if (!ev) { tip.classList.remove('on'); return; }
+  tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
+    best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
+  positionTip(tip, best.x, best.y);
+  tip.classList.add('on');
+}
 function endGlobeDrag(e) {
   gcv.classList.remove('dragging');   // before the guard: a cancelled pinch has no gDrag
   if (!gDrag) return;
@@ -132,6 +163,13 @@ function endGlobeDrag(e) {
     const rect = gcv.getBoundingClientRect();
     const best = hitTest(e.clientX - rect.left, e.clientY - rect.top);
     setSelection(best ? best.id : null);
+    /* A tap on a marker used to show nothing at all. The tooltip is driven by
+       hover, which a finger never produces, and the detail panel is the third
+       grid row on a narrow layout - measured at y=1011 in an 855px viewport,
+       156px below the fold, and it does not move when the selection changes.
+       So the one thing a phone user can do to a marker had no visible answer.
+       Give the tap the tip. */
+    if (e.pointerType && e.pointerType !== 'mouse') showTip(best);
   }
 }
 /* Lifting a finger mid-pinch must not end the gesture, and must not be read as a
@@ -176,11 +214,15 @@ function clearHover() {
   gcv.style.cursor = '';
   if (S.hover !== null) { S.hover = null; needGlobe = true; paintOnInput(); }
 }
-gcv.addEventListener('pointerleave', () => { if (!gDrag && !pinch) clearHover(); });
+/* Mouse only. A finger lifting off the canvas emits both of these with the
+   pointer removed, immediately after the pointerup that just put the tip there
+   for a tap - so clearing on them would undo the tap's only feedback one event
+   later. A touch tip is dismissed by the next tap instead. */
+const leavingWithAMouse = e => (!e.pointerType || e.pointerType === 'mouse') && !gDrag && !pinch;
+gcv.addEventListener('pointerleave', e => { if (leavingWithAMouse(e)) clearHover(); });
 gcv.addEventListener('pointerout', e => {
-  // pointerleave does not fire for a pointer that is removed (a lifted finger),
-  // and a capture released outside the element reports relatedTarget null.
-  if (!gDrag && !pinch && !e.relatedTarget) clearHover();
+  // A capture released outside the element reports relatedTarget null.
+  if (leavingWithAMouse(e) && !e.relatedTarget) clearHover();
 });
 window.addEventListener('blur', clearHover);
 
