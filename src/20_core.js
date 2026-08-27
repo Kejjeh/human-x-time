@@ -123,8 +123,13 @@ const ERAS = [
 const CENTURIES = (() => {
   const out = [];
   for (let y = -1000; y < 2100; y += 100) {
+    /* The band spans [y, y+100), so it is named after y - not after y+100.
+       `y / 100 + 1` put every CE band one century into the future: the band
+       covering 1900 to 2000 was labelled "2000s", and the one covering 2000 to
+       2100 was labelled "2100s", a century that has not started. The BCE arm
+       was already naming the band by its own start. */
     const lab = y < 0 ? `${Math.abs(y) / 100}00s BCE`
-      : y === 0 ? '1st c.' : `${y / 100 + 1}00s`;
+      : y === 0 ? '1st c.' : `${y / 100}00s`;
     out.push({ n: lab, b: ybp(y), e: ybp(y + 100), c: (y / 100) % 2 ? '#2A2622' : '#332E28' });
   }
   return out;

@@ -167,6 +167,27 @@ def run(url, headed, report):
         report.check("something is on screen at the default view", counts["showing"] > 20,
                      f"{counts['showing']} events showing")
         report.check("language masks present", counts["langs"] >= 16, f"{counts['langs']} editions")
+        # The mask is `1 << i` over LANGS, so a 33rd edition would alias bit 0
+        # and the lens would answer for the wrong language rather than fail.
+        report.check("the coverage mask still fits 32 bits", counts["langs"] <= 32,
+                     f"{counts['langs']} editions")
+
+        # Each century band is named after the century it covers. `y/100 + 1`
+        # named it after the next one, so the band over 1900-2000 read "2000s".
+        ribbon = page.evaluate("""() => {
+          const bad = [];
+          for (const c of CENTURIES) {
+            const y0 = Math.round(PRESENT - c.b), y1 = Math.round(PRESENT - c.e);
+            if (c.n === '1st c.') { if (y0 !== 0 || y1 !== 100) bad.push(c.n); continue; }
+            const m = /^(\\d+)00s( BCE)?$/.exec(c.n);
+            if (!m) { bad.push(c.n); continue; }
+            const want = m[2] ? -(+m[1]) * 100 : (+m[1]) * 100;
+            if (y0 !== want) bad.push(`${c.n} covers ${y0}..${y1}`);
+          }
+          return bad;
+        }""")
+        report.check("the century ribbon names the century it covers",
+                     not ribbon, "; ".join(ribbon[:3]) or f"{'all bands agree'}")
 
         # The coverage axis is the whole second dimension: dropping the floor
         # must actually reveal the long tail rather than doing nothing.

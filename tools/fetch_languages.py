@@ -24,7 +24,40 @@ PATH = os.path.join(ROOT, "src", "events.json")
 UA = {"User-Agent": "HumanTime/0.1 (https://github.com/kejjeh; mailto:joshp1001@gmail.com)"}
 API = "https://www.wikidata.org/w/api.php"
 
-SKIP = {"commonswiki", "specieswiki", "metawiki", "sourceswiki", "wikidatawiki"}
+EDITIONS = set()          # filled by main() from the sitematrix API
+
+# Which sitelinks are Wikipedia LANGUAGE EDITIONS.
+#
+# The old test was `k.endswith("wiki")` minus a hand-written deny-list, and it
+# let `abstractwiki` through - Abstract Wikipedia, a Wikimedia project, not an
+# edition anybody reads an article in. It is served from abstract.wikipedia.org,
+# so a host test does not catch it either, and it sits on most high-profile
+# items: seven of ten cities sampled carried it, which is the top of the very
+# rail this number drives. Every deny-list is one project launch out of date.
+#
+# So ask. action=sitematrix is the canonical list of editions, one call, and it
+# answers no for abstractwiki, commonswiki, testwiki and nostalgiawiki while
+# answering yes for every real edition including zh_min_nanwiki and be_x_oldwiki.
+SITEMATRIX = (API + "?action=sitematrix&format=json&formatversion=2"
+                    "&smtype=language&smlangprop=code|site")
+
+
+def wikipedia_editions():
+    """The dbnames of every open Wikipedia language edition, from the API."""
+    with urllib.request.urlopen(
+            urllib.request.Request(SITEMATRIX, headers=UA), timeout=60) as r:
+        matrix = json.load(r)["sitematrix"]
+    out = set()
+    for key, group in matrix.items():
+        if key in ("count", "specials"):
+            continue
+        for site in group.get("site", []):
+            if site.get("code") == "wiki" and not site.get("closed") and not site.get("private"):
+                out.add(site["dbname"])
+    if len(out) < 100:                       # a truncated answer must not silently
+        raise SystemExit(                    # redefine the corpus as uncovered
+            f"sitematrix returned only {len(out)} editions; refusing to rebuild the masks")
+    return out
 
 
 def batch(qids):
@@ -43,6 +76,9 @@ def batch(qids):
 def main():
     doc = json.load(open(PATH, encoding="utf-8"))
     events = doc["events"]
+    global EDITIONS
+    EDITIONS = wikipedia_editions()
+    print(f"{len(EDITIONS)} open Wikipedia language editions")
     qids = [e["q"] for e in events]
     print(f"{len(qids):,} events; {(len(qids) + 49) // 50} batches of 50")
 
@@ -59,10 +95,7 @@ def main():
         got = {}
         for qid, ent in ents.items():
             sl = ent.get("sitelinks") or {}
-            got[qid] = sorted(
-                k[:-4] for k in sl
-                if k.endswith("wiki") and k not in SKIP and "wikiquote" not in k
-            )
+            got[qid] = sorted(k[:-4] for k in sl if k in EDITIONS)
         with lock:
             langs_for.update(got)
             done[0] += 1
@@ -83,8 +116,13 @@ def main():
     for e in events:
         ls = langs_for.get(e["q"])
         if ls is None:
+            # The API never answered for this one. Zeroing the mask while
+            # leaving the old `sl` in place makes the page state a
+            # contradiction - "remembered in 40 editions", every one of the 32
+            # codes struck through, "No English article" - so keep whatever a
+            # previous good run recorded and let the count below report it.
             missing += 1
-            e["m"] = 0
+            e.setdefault("m", 0)
             continue
         mask = 0
         for l in ls:
@@ -103,12 +141,20 @@ def main():
             if e["m"] & (1 << idx[l]):
                 cov[l] += 1
     print(f"\nrewrote {PATH}  ({os.path.getsize(PATH):,} bytes)   unresolved: {missing}")
+    if missing:
+        print(f"  WARNING: {missing:,} events kept their previous coverage; "
+              f"re-run to resolve them.")
     print("coverage by edition (of %d events):" % len(events))
     for l, n in cov.most_common(12):
         print(f"  {l:6} {n:>5}  {100*n//len(events):>3}%  {'#' * (n * 40 // len(events))}")
     # the whole point of the axis: how uneven is the record?
-    en = sum(1 for e in events if e["m"] & (1 << idx.get("en", 0)))
-    print(f"\nevents NOT on English Wikipedia: {len(events) - en:,}")
+    # No idx.get("en", 0) default here: if English somehow missed the top 32,
+    # bit 0 is some other edition and the headline number would be a quiet lie.
+    if "en" in idx:
+        en = sum(1 for e in events if e["m"] & (1 << idx["en"]))
+        print(f"\nevents NOT on English Wikipedia: {len(events) - en:,}")
+    else:
+        print("\nEnglish is not in the top 32 editions of this corpus (unexpected)")
 
 
 if __name__ == "__main__":
