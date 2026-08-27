@@ -926,6 +926,7 @@ function resizeGlobe() {
   gx.setTransform(DPR, 0, 0, DPR, 0, 0);
   GCX = GW / 2; GCY = GH / 2;
   applyZoom();
+  measureOverlays();
 }
 
 /* Zoom alone. Assigning gcv.width reallocates and blanks the bitmap and resets
@@ -935,6 +936,31 @@ function resizeGlobe() {
 function applyZoom() {
   GR = Math.min(GW, GH) * 0.5 * ZOOMF;
   SURF.key = '';                       // the cached sphere is the wrong size now
+}
+
+/* Where the DOM overlays sit, in canvas coordinates.
+ *
+ * The label placer avoids other labels and the canvas edges, and knew nothing
+ * about the two panels drawn on top of the globe - so it put names under them.
+ * Measured over 36 rotations at the default view: 28 labels landed under the
+ * headline, "Saint Petersburg", "Great Wall of China" and "Hiroshima" among
+ * them, text over text and unreadable.
+ *
+ * getBoundingClientRect is a layout read and this list is consulted every frame,
+ * so it is measured on resize and once per state change - the headline's height
+ * follows the sub-line, which changes with the view - and never in the frame
+ * path itself. */
+const OVERLAYS = [];
+function measureOverlays() {
+  OVERLAYS.length = 0;
+  const base = gcv.getBoundingClientRect();
+  for (const sel of ['.stage-tl', '.stage-tr']) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    OVERLAYS.push([r.left - base.left - 4, r.top - base.top - 4, r.width + 8, r.height + 8]);
+  }
 }
 
 /** Cheap per-frame check that the buffers still match the laid-out boxes. */
@@ -1494,7 +1520,10 @@ function drawEvents() {
     floorRank = labelled[labelled.length - 1].r;
   }
 
+  /* Seeded with the stage overlays, so a name is never drawn under the headline
+     or the buttons. Free: this array is allocated per frame either way. */
   const boxes = [];
+  for (let i = 0; i < OVERLAYS.length; i++) boxes.push(OVERLAYS[i]);
   gx.font = `400 11px xt-cond, sans-serif`;
   for (const { k } of labelled) {
     const e = EV[GI[k]];
@@ -2748,6 +2777,9 @@ function render(dt) {
        the time axis announced "3200" for a window the page calls "the last
        3,200 years", and the rail announced "40" where the readout says "40+
        language editions". aria-valuetext is what carries the units. */
+    // The headline's height follows the sub-line, so the overlay rects the label
+    // placer avoids are re-measured here rather than only on resize.
+    measureOverlays();
     rcv.setAttribute('aria-valuemin', 0);
     rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);

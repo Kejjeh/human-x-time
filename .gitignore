@@ -4,3 +4,4 @@ node_modules/
 live_check.html
 __pycache__/
 *.py[cod]
+artifact-wrapped.html

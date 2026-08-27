@@ -146,13 +146,19 @@ def smoke():
     except ImportError:
         print("\n(skipping smoke test: pip install playwright && playwright install chromium)")
         return
-    print("\nsmoke test")
-    r = subprocess.run([sys.executable, os.path.join(HERE, "smoke_test.py")],
-                       capture_output=True, text=True)
-    tail = [l for l in r.stdout.splitlines() if "FAIL" in l or "checks passed" in l]
-    print("\n".join("  " + l.strip() for l in tail) or r.stdout[-800:])
-    if r.returncode:
-        sys.exit("FATAL: the built page does not work - see above")
+    # Both outputs, not just one. build.py emits index.html and artifact.html and
+    # this gate only ever loaded index.html - so the body-only form, the one that
+    # actually gets published, was verified by nothing. The README's note about
+    # the sibling site losing a whole build to a boot failure nothing detected is
+    # about exactly this shape of gap.
+    for label, args in (("index.html", []), ("artifact.html", ["--artifact"])):
+        print(f"\nsmoke test: {label}")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "smoke_test.py")] + args,
+                           capture_output=True, text=True)
+        tail = [l for l in r.stdout.splitlines() if "FAIL" in l or "checks passed" in l]
+        print("\n".join("  " + l.strip() for l in tail) or r.stdout[-800:])
+        if r.returncode:
+            sys.exit(f"FATAL: {label} does not work - see above")
 
 
 if __name__ == "__main__":

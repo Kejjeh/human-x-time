@@ -543,6 +543,49 @@ def run(url, headed, report):
                      any(c.isalpha() for c in vt["chron"] or ""),
                      f"rail {vt['rail']!r}, axis {vt['chron']!r}")
 
+        # The label placer avoids other labels and the canvas edges. It knew
+        # nothing about the two panels drawn on top of the globe, so it put names
+        # under them - 28 across 36 rotations at the default view, "Saint
+        # Petersburg" and "Great Wall of China" among them.
+        lab = page.evaluate("""() => {
+          const real = gx.fillText.bind(gx);
+          const seen = [];
+          gx.fillText = function (t, x, y) { seen.push({t: String(t), x, y, f: gx.font}); return real(t, x, y); };
+          const base = gcv.getBoundingClientRect();
+          const rects = ['.stage-tl', '.stage-tr'].map(sel => {
+            const el = document.querySelector(sel); if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return {l: r.left - base.left, t: r.top - base.top,
+                    r: r.right - base.left, b: r.bottom - base.top};
+          }).filter(Boolean);
+          setCoverage(40); setWindow(0, 3200); S.cluster = true;
+          let over = 0, drawn = 0, first = null;
+          for (let lam = -180; lam < 180; lam += 45) for (const phi of [-40, 0, 40]) {
+            S.rot.lam = lam; S.rot.phi = phi; invalidate(); needGlobe = true;
+            seen.length = 0; renderNow();
+            for (const s of seen) {
+              if (!/xt-cond/.test(s.f) || /600 9px/.test(s.f)) continue;
+              drawn++;
+              const w = gx.measureText(s.t).width;
+              const box = {l: s.x - 2, t: s.y - 10, r: s.x + w + 2, b: s.y + 3};
+              for (const o of rects)
+                if (box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t) {
+                  over++; if (!first) first = s.t;
+                }
+            }
+          }
+          gx.fillText = real;
+          S.rot.lam = -10; S.rot.phi = 25; invalidate(); needGlobe = true; renderNow();
+          return {over, drawn, first};
+        }""")
+        # `drawn` guards the assertion: zero overlaps because nothing was drawn
+        # is not a pass, and that is exactly what a throw inside drawEvents looks
+        # like from out here.
+        report.check("no globe label is drawn under the stage overlays",
+                     lab["over"] == 0 and lab["drawn"] > 100,
+                     f"{lab['drawn']} labels drawn, {lab['over']} under an overlay"
+                     + (f" (e.g. {lab['first']!r})" if lab["first"] else ""))
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")
@@ -673,15 +716,51 @@ def run(url, headed, report):
         browser.close()
 
 
+# The artifact variant, wrapped the way a host wraps it.
+#
+# build.py emits two documents and this gate only ever loaded one. artifact.html
+# is the body-only form - the one that actually gets published - and it differs
+# from index.html in exactly the place a boot failure hides: build.py strips the
+# meta tags out of its head with a regex, and nothing checked what was left. The
+# note in the README about the sibling site losing a whole build to a boot
+# failure nothing detected is about precisely this shape of gap, and it was open
+# on one of the two outputs.
+#
+# The wrapper is written beside the built files rather than into them, and it is
+# gitignored; --artifact builds it and tests that instead of index.html.
+ARTIFACT_WRAPPER = "artifact-wrapped.html"
+
+
+def wrap_artifact():
+    src = os.path.join(ROOT, "artifact.html")
+    if not os.path.exists(src):
+        sys.exit("FATAL: artifact.html not found - run tools/build.py first")
+    with open(src, encoding="utf-8") as f:
+        body = f.read()
+    out = os.path.join(ROOT, ARTIFACT_WRAPPER)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write('<!doctype html>\n<html lang="en">\n<head>\n'
+                '<meta charset="utf-8" />\n'
+                '<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+                '</head>\n<body>\n' + body + '\n</body>\n</html>\n')
+    return ARTIFACT_WRAPPER
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default=None)
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--artifact", action="store_true",
+                    help="test artifact.html wrapped in a host document, not index.html")
     a = ap.parse_args()
 
     httpd = None
     if a.url:
         url = a.url
+    elif a.artifact:
+        page = wrap_artifact()
+        httpd, base = serve(ROOT)
+        url = base + page
     else:
         if not os.path.exists(os.path.join(ROOT, "index.html")):
             sys.exit("FATAL: index.html not found - run tools/build.py first")
