@@ -219,6 +219,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .sect > .lbl { display:block; margin-bottom:8px; }
 .langbar { height:6px; background:var(--panel-3); border-radius:3px; overflow:hidden; margin:4px 0 8px; }
 .langbar i { display:block; height:100%; background:var(--amber); }
+.barnote { font-size:9.5px; color:var(--chalk-faint); margin:-4px 0 8px; letter-spacing:0; }
 .langs { display:flex; flex-wrap:wrap; gap:3px; }
 .langs span { font-family:var(--font-data); font-size:9.5px; padding:1px 4px; border-radius:2px;
   background:var(--panel-3); color:var(--chalk-dim); }
@@ -485,9 +486,21 @@ function fmtYear(y) {
   if (y <= 0) return `${1 - y} BCE`;
   return `${y} CE`;
 }
-function fmtYbpLabel(t) {
+/* `step` is how far this label is from its neighbour on the axis, and it decides
+   how many decimals the ka form needs. Without it a window like [11,990, 12,010]
+   printed "12 ka" twice: one decimal is not enough to tell 12,000 from 12,005,
+   and two ticks a screen apart carried the same text. Omit it and the old
+   behaviour stands, which is what the window readout and the aria-valuetext
+   want - they describe a span, not a tick. */
+function fmtYbpLabel(t, step) {
   const y = PRESENT - t;
-  if (t >= 12000) return `${(t / 1000).toFixed(t >= 1e5 ? 0 : 1).replace(/\.0$/, '')} ka`;
+  if (t >= 12000) {
+    let d = t >= 1e5 ? 0 : 1;
+    if (step > 0) d = Math.max(0, Math.min(3, Math.ceil(-Math.log10(step / 1000))));
+    let str = (t / 1000).toFixed(d);
+    if (str.indexOf('.') >= 0) str = str.replace(/0+$/, '').replace(/\.$/, '');
+    return `${str} ka`;
+  }
   return fmtYear(y);
 }
 
@@ -1578,15 +1591,39 @@ function resizeChron() {
 }
 function chronScale() { return makeScale(S.win.t0, S.win.t1, CW); }
 
+/* 1, 2, 5 times a power of ten - the ladder that suits a logarithmic axis. */
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9))));
+  const n = raw / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+
+/* The decade ladder is right for a window spanning orders of magnitude, which is
+   what the asinh scale exists for. It is EMPTY for a narrow window that happens
+   to contain none of its rungs: [74,000, 75,000] and [11,990, 12,010] each
+   produced no labels at all - a time axis with no indication of what time it is
+   showing, reachable by zooming in anywhere in deep time. So when the ladder
+   comes up short, fall back to a linear nice step across the window. */
 function tickValues(t0, t1) {
   const out = [];
-  const p0 = Math.floor(Math.log10(Math.max(t0, 1))), p1 = Math.ceil(Math.log10(t1));
+  const p0 = Math.floor(Math.log10(Math.max(t0, 1))),
+        p1 = Math.ceil(Math.log10(Math.max(t1, 1)));
   for (let p = p0; p <= p1; p++)
     for (const m of [1, 2, 5]) {
       const v = m * Math.pow(10, p);
       if (v >= t0 && v <= t1) out.push(v);
     }
   if (t0 <= 0) out.push(0);
+
+  if (out.length < 3 && t1 > t0) {
+    const step = niceStep((t1 - t0) / 5);
+    const first = Math.ceil(t0 / step);
+    const last = Math.floor(t1 / step);
+    for (let i = first; i <= last; i++) {
+      const v = i * step;                      // multiply, never accumulate
+      if (out.indexOf(v) < 0) out.push(v);
+    }
+  }
   return out.sort((a, b) => b - a);
 }
 
@@ -1670,12 +1707,19 @@ function drawChron() {
 
   cx2.font = '400 9.5px xt-mono, monospace';
   let lastX = -999;
-  for (const t of tickValues(S.win.t0, S.win.t1)) {
+  const tv = tickValues(S.win.t0, S.win.t1);
+  for (let ti = 0; ti < tv.length; ti++) {
+    const t = tv[ti];
     const x = sc.x(t);
     if (x < 2 || x > CW - 2) continue;
     cx2.strokeStyle = withAlpha(CSSV['chalk-faint'], 0.3);
     cx2.beginPath(); cx2.moveTo(x, TICK_H - 5); cx2.lineTo(x, TICK_H); cx2.stroke();
-    const lab = fmtYbpLabel(t);
+    // How close this tick's nearest neighbour is decides how precise its label
+    // has to be; see fmtYbpLabel.
+    let gap = Infinity;
+    if (ti > 0) gap = Math.min(gap, Math.abs(t - tv[ti - 1]));
+    if (ti < tv.length - 1) gap = Math.min(gap, Math.abs(t - tv[ti + 1]));
+    const lab = fmtYbpLabel(t, isFinite(gap) ? gap : 0);
     const w = cx2.measureText(lab).width;
     if (x - w / 2 > lastX + 8 && x + w / 2 < CW - 2) {
       cx2.fillStyle = CSSV['chalk-faint'];
@@ -1813,6 +1857,12 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
    lens dropdown and the detail panel when it was tried. Nothing here is
    trusted markup. Event names, QIDs and palette values go the same way. */
 
+/* The bar and the number above it were measuring different things.
+   `e.sl` counts every Wikipedia edition - some 340 of them - while the bar and
+   the codes below it are over LANGS, the 32 most-carried. So the Pyramid of
+   Menkaure read "45 language editions" above a bar at 100%, and Paris read 289
+   above a bar at 100%: six times the coverage, same picture, and nothing on
+   screen said the bar had a different denominator. The bar is captioned now. */
 function langList(e) {
   const have = [], missing = [];
   for (const l of LANGS) ((e.m & LANG_BIT[l]) ? have : missing).push(l);
@@ -1881,8 +1931,11 @@ function renderDetail() {
 
     <div class="sect">
       <span class="lbl">Who remembers it</span>
-      <div class="num" style="font-size:15px;color:var(--amber)">${e.sl} language editions</div>
+      <div class="num" style="font-size:15px;color:var(--amber)">${e.sl === 0
+        ? 'No Wikipedia article, in any edition'
+        : `${e.sl} language edition${e.sl === 1 ? '' : 's'}`}</div>
       <div class="langbar"><i style="width:${pct}%"></i></div>
+      <div class="barnote num">${have.length} of the ${LANGS.length} most-carried editions</div>
       <div class="langs">
         ${have.map(l => `<span>${esc(l)}</span>`).join('')}
         ${missing.slice(0, 12).map(l => `<span class="miss">${esc(l)}</span>`).join('')}

@@ -94,9 +94,21 @@ function fmtYear(y) {
   if (y <= 0) return `${1 - y} BCE`;
   return `${y} CE`;
 }
-function fmtYbpLabel(t) {
+/* `step` is how far this label is from its neighbour on the axis, and it decides
+   how many decimals the ka form needs. Without it a window like [11,990, 12,010]
+   printed "12 ka" twice: one decimal is not enough to tell 12,000 from 12,005,
+   and two ticks a screen apart carried the same text. Omit it and the old
+   behaviour stands, which is what the window readout and the aria-valuetext
+   want - they describe a span, not a tick. */
+function fmtYbpLabel(t, step) {
   const y = PRESENT - t;
-  if (t >= 12000) return `${(t / 1000).toFixed(t >= 1e5 ? 0 : 1).replace(/\.0$/, '')} ka`;
+  if (t >= 12000) {
+    let d = t >= 1e5 ? 0 : 1;
+    if (step > 0) d = Math.max(0, Math.min(3, Math.ceil(-Math.log10(step / 1000))));
+    let str = (t / 1000).toFixed(d);
+    if (str.indexOf('.') >= 0) str = str.replace(/0+$/, '').replace(/\.$/, '');
+    return `${str} ka`;
+  }
   return fmtYear(y);
 }
 
