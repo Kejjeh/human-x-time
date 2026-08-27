@@ -50,6 +50,20 @@ def main():
         sys.exit(f"FATAL: {len(events['langs'])} language editions; the client's "
                  f"32-bit coverage mask cannot address more than 32")
 
+    # The second axis is the language coverage, and it is written by a pass that
+    # runs after the ingest. Ship without it and nothing upstream complains: the
+    # corpus round-trips, the page boots, and the lens quietly becomes a dropdown
+    # with one option while "not on English Wikipedia" matches everything,
+    # because LANG_BIT.en is undefined. Both halves have to be there.
+    if not events["langs"]:
+        sys.exit("FATAL: the corpus carries no language vocabulary. "
+                 "Run tools/fetch_languages.py, then build again.")
+    unmasked = sum(1 for e in source["events"] if "m" not in e)
+    if unmasked:
+        sys.exit(f"FATAL: {unmasked:,} of {len(source['events']):,} events have no "
+                 f"language mask; they would read as carried by no edition at all. "
+                 f"Run tools/fetch_languages.py, then build again.")
+
     # The encoding alphabet excludes quote, backslash and angle brackets, so the
     # payloads drop into a JS string literal untouched. Assert it rather than hope.
     for name, blob in (("land", land), ("plates", plates)):

@@ -200,6 +200,15 @@ def search_class(term):
 
 
 def resolve_classes(cats, refresh):
+    """Resolve the categories asked for, and never forget the ones that were not.
+
+    The cache used to be rewritten from `out`, which holds only the categories
+    this run looked at - so `--only school`, the backfill command in this
+    module's own docstring, replaced a 62-entry classes.json with a 1-entry one
+    and silently threw away every other resolution. Measured: 4 entries in, 1
+    out, church/monument/village gone. The next full run then has to re-resolve
+    from scratch, and the file stops being the reviewable record it is for.
+    """
     cache = {}
     if os.path.exists(CLASSES) and not refresh:
         cache = json.load(open(CLASSES, encoding="utf-8"))
@@ -216,7 +225,13 @@ def resolve_classes(cats, refresh):
         out[key] = {"qid": qid, "term": term, "label": lab, "desc": desc}
         say(f"  {key:12} {term!r:26} -> {qid:10} {lab} ({(desc or '')[:52]})")
         time.sleep(0.3)
-    json.dump(out, open(CLASSES, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    merged = dict(cache)
+    merged.update(out)
+    # Stable order, so the diff shows what changed rather than a reshuffle.
+    order = [k for k, *_ in CATEGORIES]
+    merged = dict(sorted(merged.items(),
+                         key=lambda kv: (order.index(kv[0]) if kv[0] in order else 999, kv[0])))
+    json.dump(merged, open(CLASSES, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return out, missing
 
 
@@ -319,9 +334,11 @@ def main():
     theme_of = {k: t for k, _, _, t, _ in cats}
     events = {}
     prior = {}
+    prior_langs = []
     if a.merge and os.path.exists(OUT):
         prior_doc = json.load(open(OUT, encoding="utf-8"))
         prior = {e["q"]: e for e in prior_doc["events"]}
+        prior_langs = prior_doc.get("langs", [])
         events.update(prior)
         say(f"merging into {len(prior):,} existing events")
     per_cat = collections.Counter()
@@ -363,6 +380,20 @@ def main():
            "categories": cat_rows,
            "themes": THEMES,
            "classes": {k: classes[k]["qid"] for k in classes}}
+    if a.merge and prior_langs:
+        # `langs` is the vocabulary every `m` mask is written against, and it is
+        # written by fetch_languages.py, not here. Rebuilding the document
+        # without it on a merge run left the masks in place and the key they
+        # decode with gone: LANGS becomes [], the lens dropdown loses every
+        # option, and "not on English Wikipedia" matches the whole corpus
+        # because LANG_BIT.en is undefined. Carry it forward.
+        doc["langs"] = prior_langs
+    # Events this run added have no mask yet - fetch_languages.py is a separate
+    # pass - and until it runs they read as "carried by no edition at all".
+    unmasked = sum(1 for e in out if "m" not in e)
+    if unmasked:
+        say(f"\n{unmasked:,} events have no language mask. "
+            f"Run tools/fetch_languages.py before tools/build.py.")
     if a.merge:
         say(f"\nmerged: {len(prior):,} + {len(out) - len(prior):,} new = {len(out):,}")
     json.dump(doc, open(OUT, "w", encoding="utf-8"), separators=(",", ":"), ensure_ascii=False)
