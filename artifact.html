@@ -314,7 +314,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
     </div>
 
     <div class="group">
-      <span class="lbl" for="lens">Whose record</span>
+      <label class="lbl" for="lens">Whose record</label>
       <select class="lens" id="lens" aria-label="Filter by which Wikipedia edition covers the event"></select>
       <p class="hint" id="lens-hint"></p>
     </div>
@@ -708,7 +708,17 @@ const TEX = { w: 0, h: 0, data: null, ready: false };
 
 /* Ray directions for the disc, in the *unrotated* view frame. Depends only on
    canvas geometry, so it is rebuilt on resize and reused every frame. */
-const RAY = { scale: 0, w: 0, h: 0, nz: null, nx: null, ny: null, idx: null, buf: null, img: null };
+const RAY = { scale: 0, w: 0, h: 0, key: '', nz: null, nx: null, ny: null, idx: null, buf: null, img: null };
+
+/* The rays are unit directions built from the disc's centre and radius, so they
+   are only valid for the geometry they were built from. Testing the scale and
+   the width alone missed both of the ways that geometry moves without either
+   changing: a zoom (GR changes, GW does not) and a height-only window resize
+   (GH and GCY change, GW does not). Both left the imagery painted at the old
+   radius while the atmosphere, the limb, the graticule and every marker used
+   the new one - a photograph of Earth sitting still inside a limb ring that
+   grows. Key the cache on everything buildRays actually reads. */
+const rayKey = scale => `${scale}|${GW.toFixed(2)}x${GH.toFixed(2)}|${GCX.toFixed(2)},${GCY.toFixed(2)}|${GR.toFixed(3)}`;
 
 function buildRays(scale) {
   const w = Math.max(1, Math.round(GW * scale)), h = Math.max(1, Math.round(GH * scale));
@@ -728,7 +738,7 @@ function buildRays(scale) {
       k++;
     }
   }
-  RAY.scale = scale; RAY.w = w; RAY.h = h;
+  RAY.scale = scale; RAY.w = w; RAY.h = h; RAY.key = rayKey(scale);
   RAY.nz = nz; RAY.nx = nx; RAY.ny = ny; RAY.idx = idx; RAY.count = k;
   RAY.img = gx.createImageData(w, h);
   RAY.buf = new Uint32Array(RAY.img.data.buffer);
@@ -781,7 +791,7 @@ function movingScale() {
 function paintSatellite(scale) {
   if (!TEX.ready) return false;
   const _t0 = performance.now();
-  if (RAY.scale !== scale || RAY.w !== Math.round(GW * scale)) buildRays(scale);
+  if (RAY.key !== rayKey(scale)) buildRays(scale);
   const { nz, nx, ny, idx, buf, count } = RAY;
   const tw = TEX.w, th = TEX.h, td = TEX.data;
   const m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4],
@@ -1724,15 +1734,36 @@ function langList(e) {
   return { have, missing };
 }
 
+/* Bounded selection instead of a sort.
+   Every list in this panel is a top-six of a set that reaches 38,242 rows at
+   the coverage floor of 1 - and renderDetail runs once per state change, which
+   during a rail drag or a time-axis drag means once per frame. Three full sorts
+   of the visible set cost 17 ms there, on the frame path that the rest of this
+   codebase went to some trouble to keep under 12. A k-of-n insertion is one
+   pass with one comparison against the current floor in the common case, and k
+   is six. Same output, no allocation beyond the k slots. */
+function topK(items, k, better) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const e = items[i];
+    if (out.length === k && !better(e, out[k - 1])) continue;
+    let pos = out.length;
+    while (pos > 0 && better(e, out[pos - 1])) pos--;
+    out.splice(pos, 0, e);
+    if (out.length > k) out.pop();
+  }
+  return out;
+}
+const byCoverage = (a, b) => a.sl > b.sl;
+
 function renderDetail() {
   const F = q();
   if (!S.selection || !BY_Q[S.selection]) {
-    const top = F.events.slice().sort((a, b) => b.sl - a.sl).slice(0, 6);
-    // Sorted, not sliced raw: the corpus arrives in year order now, so an
+    const top = topK(F.events, 6, byCoverage);
+    // Ranked, not sliced raw: the corpus arrives in year order now, so an
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
-    const thin = F.events.filter(e => !(e.m & LANG_BIT.en))
-      .sort((a, b) => b.sl - a.sl).slice(0, 5);
+    const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
     elDetail.innerHTML = `
       <div class="empty">
         <strong>Nothing selected</strong>
@@ -1751,10 +1782,8 @@ function renderDetail() {
   const { have, missing } = langList(e);
   const pct = Math.round(100 * have.length / LANGS.length);
   // nearest in time, within the same window
-  const near = F.events
-    .filter(x => x.q !== e.q)
-    .sort((a, b) => Math.abs(a.y - e.y) - Math.abs(b.y - e.y))
-    .slice(0, 6);
+  const near = topK(F.events, 7, (a, b) => Math.abs(a.y - e.y) < Math.abs(b.y - e.y))
+    .filter(x => x.q !== e.q).slice(0, 6);
 
   elDetail.innerHTML = `
     <div class="dt-head">
@@ -2299,6 +2328,25 @@ gcv.addEventListener('pointercancel', e => {
   gDrag = null; gVel.length = 0;
   gcv.classList.remove('dragging');
 });
+/* The tooltip and the hover highlight are only ever cleared by a pointermove
+   that hits nothing. Move off the canvas entirely - onto the instrument panel,
+   the rail, or out of the window - and no such move ever arrives, so the tip
+   stays parked over the globe naming an event the cursor left behind, and
+   S.hover keeps that marker's label emphasised. Clear both on the way out. */
+function clearHover() {
+  const tip = document.getElementById('tip');
+  if (tip) tip.classList.remove('on');
+  gcv.style.cursor = '';
+  if (S.hover !== null) { S.hover = null; needGlobe = true; paintOnInput(); }
+}
+gcv.addEventListener('pointerleave', () => { if (!gDrag && !pinch) clearHover(); });
+gcv.addEventListener('pointerout', e => {
+  // pointerleave does not fire for a pointer that is removed (a lifted finger),
+  // and a capture released outside the element reports relatedTarget null.
+  if (!gDrag && !pinch && !e.relatedTarget) clearHover();
+});
+window.addEventListener('blur', clearHover);
+
 gcv.addEventListener('wheel', e => {
   e.preventDefault();
   setZoom(ZOOMF * (e.deltaY > 0 ? 0.92 : 1.087));
@@ -2473,7 +2521,6 @@ function render(dt) {
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();
     document.getElementById('rail-n').textContent = S.kt + '+';
-    const span = S.win.t1 - S.win.t0;
     document.getElementById('rd-window').textContent =
       S.win.t1 >= T_MAX * 0.99 ? 'all 75,000 years'
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
@@ -2487,6 +2534,7 @@ function render(dt) {
     document.getElementById('lens-hint').textContent = S.lens
       ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
       : 'Pick an edition to see what it does — or does not — cover.';
+    rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
     ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));
     needPanel = false;

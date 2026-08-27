@@ -60,8 +60,6 @@ def main():
     left = re.findall(r"/\*@[A-Z]+@\*/", inner)
     if left:
         sys.exit(f"FATAL: unsubstituted placeholders remain: {set(left)}")
-    if "</script>" in js.replace("</script>", "", 0)[:0]:
-        pass
     if re.search(r"</script", js, re.I):
         sys.exit("FATAL: a literal </script> inside the JS payload would close the tag early")
 

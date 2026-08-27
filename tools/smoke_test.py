@@ -147,12 +147,15 @@ def run(url, headed, report):
         if not r.get("err"):
             report.check("the coverage rail is drawn", r["colours"] >= 5, f"{r['colours']} colours")
 
-        report.check("theme chips rendered",
-                     page.evaluate("document.getElementById('themes').children.length") == 6,
-                     f"{page.evaluate('document.getElementById(\"themes\").children.length')} chips")
-        report.check("the language lens is populated",
-                     page.evaluate("document.getElementById('lens').options.length") > 10,
-                     f"{page.evaluate('document.getElementById(\"lens\").options.length')} options")
+        # Read once and reuse. Escaped quotes inside an f-string expression are a
+        # syntax error before Python 3.12, which turned this whole gate - the one
+        # build.py runs as a build gate - into a SyntaxError on 3.10 and 3.11, and
+        # build.py reports that as "the built page does not work".
+        chips = page.evaluate("document.getElementById('themes').children.length")
+        themes = page.evaluate("THEMES.length")
+        report.check("theme chips rendered", chips == themes, f"{chips} chips")
+        opts = page.evaluate("document.getElementById('lens').options.length")
+        report.check("the language lens is populated", opts > 10, f"{opts} options")
 
         # ------------------------------------------------------- the corpus
         counts = page.evaluate("""() => {
