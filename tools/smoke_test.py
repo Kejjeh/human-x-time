@@ -309,6 +309,47 @@ def run(url, headed, report):
             txt = page.evaluate("document.getElementById('detail').innerText || ''")
             report.check("the detail panel fills in", len(txt) > 40, f"{len(txt)} chars")
 
+            # The tip is up to 250px wide and CSS centres it on the marker, so
+            # writing the marker's x straight into `left` put half of it outside
+            # .stage - which is overflow:hidden - for anything near an edge.
+            # Drive it to the corners rather than trusting wherever the picked
+            # marker happened to be - the marker above is deliberately chosen
+            # near the middle, which is the one place this cannot fail.
+            escaped = page.evaluate("""() => {
+              const el = document.getElementById('tip');
+              const stage = document.getElementById('stage');
+              const out = [];
+              for (const [x, y] of [[2, 2], [GW - 2, 2], [2, GH - 2], [GW - 2, GH - 2],
+                                    [GW / 2, 4], [GW / 2, GH / 2]]) {
+                showTip({ id: EV[0].q, x, y, n: 1 });
+                const t = el.getBoundingClientRect(), s = stage.getBoundingClientRect();
+                if (t.left < s.left - 1 || t.right > s.right + 1 ||
+                    t.top < s.top - 1 || t.bottom > s.bottom + 1)
+                  out.push(`${Math.round(x)},${Math.round(y)} -> ` +
+                           `[${Math.round(t.left)},${Math.round(t.top)},` +
+                           `${Math.round(t.right)},${Math.round(t.bottom)}]`);
+              }
+              el.classList.remove('on');
+              return out;
+            }""")
+            report.check("the tooltip stays inside the stage at every edge",
+                         not escaped, "; ".join(escaped[:3]) or "all six anchors fit")
+
+            # A tap is the only thing a phone can do to a marker, and it produced
+            # nothing: the tip is driven by hover, which a finger never fires,
+            # and the detail panel is 156px below the fold on a narrow layout
+            # and does not move when the selection changes.
+            page.evaluate("S.selection = null; document.getElementById('tip').classList.remove('on'); invalidate(); renderNow();")
+            page.wait_for_timeout(80)
+            tx, ty = box["x"] + picked["x"], box["y"] + picked["y"]
+            touch("touchStart", [(tx, ty)])
+            touch("touchEnd", [])
+            page.wait_for_timeout(200)
+            report.check("a tap on a marker answers with the tooltip",
+                         page.evaluate("document.getElementById('tip').classList.contains('on')")
+                         and page.evaluate("S.selection") is not None,
+                         f"selection={page.evaluate('S.selection')!r}")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")
