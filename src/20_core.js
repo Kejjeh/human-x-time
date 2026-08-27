@@ -88,7 +88,6 @@ function makeScale(t0, t1, w) {
 }
 
 const ybp = year => PRESENT - year;
-const yearOf = t => Math.round(PRESENT - t);
 
 function fmtYear(y) {
   y = Math.round(y);
@@ -99,10 +98,6 @@ function fmtYbpLabel(t) {
   const y = PRESENT - t;
   if (t >= 12000) return `${(t / 1000).toFixed(t >= 1e5 ? 0 : 1).replace(/\.0$/, '')} ka`;
   return fmtYear(y);
-}
-function fmtSpan(s) {
-  if (s >= 12000) return `${Math.round(s / 1000).toLocaleString()} thousand years`;
-  return `${Math.round(s).toLocaleString()} years`;
 }
 
 /* ---------------------------------------------- historical period ribbon */
