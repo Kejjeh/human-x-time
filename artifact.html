@@ -2869,15 +2869,32 @@ function render(dt) {
     needPanel = false;
   }
 }
+/* A render that throws is caught so the loop survives it - and until now that
+   was the whole of it: a console.error and a canvas still showing its last good
+   frame. From outside the page nothing changed. __BOOT_OK exists precisely so
+   the smoke test can ask whether boot worked; there was no way to ask the same
+   about the frame after it. Injecting a failure into drawEvents mid-session
+   proved it: nothing escaped to window.onerror, __BOOT_OK stayed true, the
+   canvas kept 1,997 distinct colours, and the only trace was a console line.
+   That is the failure the sibling site lost a build to, arriving after boot
+   rather than during it. Count it and keep the first one. */
+window.__RENDER_ERRS = 0;
+window.__RENDER_ERR = null;
+function renderFailed(err) {
+  window.__RENDER_ERRS++;
+  if (!window.__RENDER_ERR) window.__RENDER_ERR = String((err && err.stack) || err);
+  console.error('render failed', err);
+}
+
 function frame(now) {
   lastRafAt = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  try { render(dt); } catch (err) { console.error('render failed', err); }
+  try { render(dt); } catch (err) { renderFailed(err); }
   requestAnimationFrame(frame);
 }
 function renderNow() {
   last = performance.now();
-  try { render(0.016); } catch (err) { console.error('render failed', err); }
+  try { render(0.016); } catch (err) { renderFailed(err); }
 }
 /* Has the animation loop actually run lately?
    The old test asked whether a frame had been *requested*, which is true forever
@@ -2990,7 +3007,7 @@ function onBeat() {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (isAnimating()) needGlobe = true;           // arcs and spin repaint the globe
-  try { render(dt); } catch (err) { console.error('render failed', err); }
+  try { render(dt); } catch (err) { renderFailed(err); }
 }
 
 function startHeartbeat() {
