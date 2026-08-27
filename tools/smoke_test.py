@@ -350,6 +350,65 @@ def run(url, headed, report):
                          and page.evaluate("S.selection") is not None,
                          f"selection={page.evaluate('S.selection')!r}")
 
+        # Where markers overlap, the one you can see is the one painted last -
+        # both draw paths run back to front. Taking the nearest centre instead
+        # selected the marker underneath in 1,938 of 1,954 overlapping cases.
+        front = page.evaluate("""() => {
+          S.cluster = false; S.kt = 25; invalidate(); drawEvents();
+          let tested = 0, ok = 0;
+          for (let a = 0; a < HN && tested < 300; a++)
+            for (let b = a + 1; b < Math.min(HN, a + 60); b++) {
+              const d = Math.hypot(HX[a] - HX[b], HY[a] - HY[b]);
+              if (!(d > 0.5 && d < Math.min(HR[a], HR[b]) * 0.6)) continue;
+              const mx = (HX[a] + HX[b]) / 2, my = (HY[a] + HY[b]) / 2;
+              let want = -1;
+              for (let k = HN - 1; k >= 0; k--) {
+                const r = HR[k], ax = HX[k] - mx, ay = HY[k] - my;
+                if (ax * ax + ay * ay < r * r) { want = k; break; }
+              }
+              const got = hitTest(mx, my);
+              tested++;
+              if (want >= 0 && got && got.i === HI[want]) ok++;
+              if (tested >= 300) break;
+            }
+          return { tested, ok };
+        }""")
+        if front["tested"]:
+            report.check("a click takes the marker on top, not the nearest",
+                         front["ok"] == front["tested"],
+                         f"{front['ok']}/{front['tested']} overlapping pairs")
+
+        # pointerdown fires for every button, so a right-click used to be a
+        # gesture: on the rail it set the coverage floor, measured jumping from
+        # 40 to 3 while the context menu opened over the top.
+        page.evaluate("setZoom(0.86); S.cluster = true; S.rot.lam = -10; S.spin.lam = 0; setCoverage(40); renderNow();")
+        page.wait_for_timeout(80)
+        lam0 = page.evaluate("S.rot.lam")
+        kt0 = page.evaluate("S.kt")
+        rb = page.evaluate("(() => { const r = document.getElementById('railcv')"
+                           ".getBoundingClientRect(); return {x: r.left, y: r.top,"
+                           " w: r.width, h: r.height}; })()")
+        page.mouse.move(box["x"] + 200, box["y"] + 200)
+        page.mouse.down(button="right")
+        page.mouse.move(box["x"] + 320, box["y"] + 200, steps=5)
+        page.mouse.up(button="right")
+        page.mouse.move(rb["x"] + rb["w"] / 2, rb["y"] + rb["h"] * 0.8)
+        page.mouse.down(button="right")
+        page.mouse.up(button="right")
+        page.wait_for_timeout(150)
+        report.check("a secondary button drives nothing",
+                     abs(page.evaluate("S.rot.lam") - lam0) < 1 and page.evaluate("S.kt") == kt0,
+                     f"lam {lam0:.1f} -> {page.evaluate('S.rot.lam'):.1f}, "
+                     f"floor {kt0} -> {page.evaluate('S.kt')}")
+        # ...and the primary one still does.
+        page.mouse.move(box["x"] + 200, box["y"] + 200)
+        page.mouse.down()
+        page.mouse.move(box["x"] + 320, box["y"] + 200, steps=5)
+        page.mouse.up()
+        page.wait_for_timeout(150)
+        report.check("the primary button still drags", abs(page.evaluate("S.rot.lam") - lam0) > 1,
+                     f"lam {lam0:.1f} -> {page.evaluate('S.rot.lam'):.1f}")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")

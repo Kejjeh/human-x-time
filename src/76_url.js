@@ -138,6 +138,10 @@ window.addEventListener('hashchange', () => {
   if (location.hash === hashSelf) return;
   hashSelf = '';                // consumed; a later Back to this view must not be ignored
   readHash();                   // false only means "no hash", which is a real view too
+  // The hover is a property of where the cursor is, not of the view, and the
+  // restored view may not even contain the event it names - it kept that
+  // marker's label emphasised across a Back.
+  S.hover = null;
   renderLens();                 // the lens options must exist before value= sticks
   syncControls();
   applyZoom();

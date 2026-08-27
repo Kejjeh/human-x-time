@@ -45,9 +45,27 @@ function grow(n) {
    density instead of as an unreadable smear. The most-covered event in each cell
    supplies the label and the click target - the cell stands for something real
    rather than for a centroid nobody chose. */
+/* The bins are slot numbers into parallel typed arrays, not six-element arrays.
+   One array per occupied cell per frame is 565 short-lived allocations at the
+   default view and more as the cell grid gets finer - sixty times a second, in
+   the drag this whole file exists to keep smooth, and against its own stated
+   invariant that nothing in the frame path allocates. The Map still churns its
+   entries; the payload no longer does. Accumulators are Float64 because they
+   sum screen coordinates before dividing. */
 const BINS = new Map();
+let BC = new Uint32Array(0), BSX = new Float64Array(0), BSY = new Float64Array(0);
+let BI = new Int32Array(0), BD = new Float32Array(0), BT = new Int8Array(0);
+function growBins(n) {
+  if (BC.length >= n) return;
+  const k = Math.max(1024, 1 << Math.ceil(Math.log2(n)));
+  BC = new Uint32Array(k); BSX = new Float64Array(k); BSY = new Float64Array(k);
+  BI = new Int32Array(k); BD = new Float32Array(k); BT = new Int8Array(k);
+}
+
 function clusterInto(m, cell) {
   BINS.clear();
+  growBins(Math.max(m, 1024));
+  let g = 0;
   for (let k = 0; k < m; k++) {
     /* Math.floor, not |0. Bitwise-or truncates toward zero, so -0.9 and +0.9
        both land in cell 0 and the row and column through the canvas origin are
@@ -57,22 +75,25 @@ function clusterInto(m, cell) {
        into neighbours they are not near. Also *4093 on a negative index
        collides with a positive one; flooring keeps the key monotonic. */
     const key = Math.floor(PX[k] / cell) * 4093 + Math.floor(PY[k] / cell);
-    const b = BINS.get(key);
+    const i = PI[k], th = EVTH[i];
+    let b = BINS.get(key);
     if (b === undefined) {
-      BINS.set(key, [1, PX[k], PY[k], PI[k], PD[k], THEME_IX[EV[PI[k]].theme]]);
+      b = g++;
+      BINS.set(key, b);
+      BC[b] = 1; BSX[b] = PX[k]; BSY[b] = PY[k];
+      BI[b] = i; BD[b] = PD[k]; BT[b] = th;
     } else {
-      b[0]++; b[1] += PX[k]; b[2] += PY[k];
-      if (EVSL[PI[k]] > EVSL[b[3]]) { b[3] = PI[k]; b[4] = PD[k]; }
-      if (b[5] >= 0 && b[5] !== THEME_IX[EV[PI[k]].theme]) b[5] = -1;
+      BC[b]++; BSX[b] += PX[k]; BSY[b] += PY[k];
+      if (EVSL[i] > EVSL[BI[b]]) { BI[b] = i; BD[b] = PD[k]; }
+      if (BT[b] >= 0 && BT[b] !== th) BT[b] = -1;
     }
   }
-  let g = 0;
-  for (const b of BINS.values()) {
-    GN[g] = b[0];
-    GX[g] = b[0] === 1 ? b[1] : b[1] / b[0];
-    GY[g] = b[0] === 1 ? b[2] : b[2] / b[0];
-    GI[g] = b[3]; GD[g] = b[4]; GMIX[g] = b[5] < 0 ? 1 : 0;
-    g++;
+  for (let b = 0; b < g; b++) {
+    const n = BC[b];
+    GN[b] = n;
+    GX[b] = n === 1 ? BSX[b] : BSX[b] / n;
+    GY[b] = n === 1 ? BSY[b] : BSY[b] / n;
+    GI[b] = BI[b]; GD[b] = BD[b]; GMIX[b] = BT[b] < 0 ? 1 : 0;
   }
   return g;
 }
@@ -85,17 +106,23 @@ let HX = new Float32Array(0), HY = new Float32Array(0), HR = new Float32Array(0)
 let HI = new Int32Array(0), HC = new Uint32Array(0);
 let HN = 0;
 
+/* Frontmost wins, not nearest.
+   Hit targets are appended in draw order, and both draw paths run back to front
+   - the unclustered one sorts by depth, the dense one by depth slab - so the
+   last hit in the list is the one actually painted on top. Taking the nearest
+   centre instead meant that where two markers overlap you could click the one
+   you can see and select the one behind it: measured on an overlapping pair of
+   radius 19.6 and 21, a click at their midpoint returned the marker underneath.
+   Walk backwards and take the first hit. */
 function hitTest(mx, my) {
-  let best = -1, bd = 1e9;
-  for (let k = 0; k < HN; k++) {
+  for (let k = HN - 1; k >= 0; k--) {
     const r = HR[k];
     const dx = HX[k] - mx; if (dx > r || dx < -r) continue;
     const dy = HY[k] - my; if (dy > r || dy < -r) continue;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (d < r && d < bd) { bd = d; best = k; }
+    if (dx * dx + dy * dy >= r * r) continue;
+    return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k] };
   }
-  if (best < 0) return null;
-  return { id: EV[HI[best]].q, i: HI[best], x: HX[best], y: HY[best], n: HC[best] };
+  return null;
 }
 
 function drawEvents() {
