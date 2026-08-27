@@ -470,6 +470,36 @@ def run(url, headed, report):
                      all(v["ordered"] for v in srch.values()) and srch["york"]["top"] == "York",
                      f"top hit for 'york' is {srch['york']['top']!r}")
 
+        # Language codes and theme keys come from the corpus, which comes from
+        # Wikidata, and they used to go into innerHTML raw. A dbname is [a-z0-9_]
+        # in practice, so this was never exploitable - but it is a third party's
+        # data in a file where every other interpolation is escaped, and a code
+        # of `x"><img ...>` put a live element into the lens and the panel.
+        inject = page.evaluate("""() => {
+          const PAY = 'x"><img src=x onerror="window.__XSS=1">';
+          const out = {};
+          const l0 = LANGS[0]; LANGS[0] = PAY; LANG_BIT[PAY] = LANG_BIT[l0];
+          const sel = document.getElementById('lens');
+          sel.dataset.built = ''; renderLens();
+          const keep = S.selection;
+          S.selection = EV[0].q; renderDetail();
+          out.lang = !!document.querySelector('#lens img, #detail img');
+          LANGS[0] = l0; delete LANG_BIT[PAY]; sel.dataset.built = ''; renderLens();
+          const t0 = THEMES[0]; THEMES[0] = PAY; S.themes.add(PAY); CSSV[PAY] = '#fff';
+          renderThemes();
+          out.theme = !!document.querySelector('#themes img');
+          THEMES[0] = t0; S.themes.delete(PAY); renderThemes();
+          const n0 = EV[0].n; EV[0].n = PAY; S.selection = EV[0].q; renderDetail();
+          out.name = !!document.querySelector('#detail img');
+          EV[0].n = n0; S.selection = keep; invalidate(); renderDetail();
+          out.flag = !!window.__XSS;
+          return out;
+        }""")
+        report.check("corpus strings cannot inject markup",
+                     not any(inject.values()),
+                     ", ".join(f"{k} leaked" for k, v in inject.items() if v) or
+                     "lens, themes, names and the panel all escape")
+
         # -------------------------------------------------------- URL state
         if page.evaluate("typeof writeHash === 'function'"):
             page.evaluate("setCoverage(12); S.rot.lam = 123; S.rot.phi = -33; writeHash(true);")
