@@ -784,6 +784,96 @@ def run(url, headed, report):
                      ", ".join(f"{k} leaked" for k, v in inject.items() if v) or
                      "lens, themes, names and the panel all escape")
 
+        # ------------------------------------------------------- the fuzz
+        # A deterministic random walk over every control there is, checking the
+        # invariants after every 25 steps. This is what found the unguarded
+        # setPointerCapture on the rail and the time axis: it throws for a
+        # pointer that is not active, the call sat above the assignment, and the
+        # handler died before rDrag or cDrag was ever set - so the gesture did
+        # not happen and an uncaught error landed on the page. Seeded, so a
+        # failure is reproducible.
+        page_errors.clear()
+        fuzz = page.evaluate("""() => {
+          let seed = 12345;
+          const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+          const pick = a => a[(rnd() * a.length) | 0];
+          const box = gcv.getBoundingClientRect();
+          const rb = rcv.getBoundingClientRect(), cb = ccv.getBoundingClientRect();
+          const ptr = (el, kind, x, y, id) => el.dispatchEvent(new PointerEvent(kind,
+            {clientX: x, clientY: y, bubbles: true, pointerId: id, pointerType: 'mouse',
+             isPrimary: true, button: 0}));
+          const key = (el, k) => el.dispatchEvent(
+            new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
+          const bad = [];
+          const check = what => {
+            const p = [];
+            for (const v of [S.kt, S.win.t0, S.win.t1, S.rot.lam, S.rot.phi, ZOOMF, GR, GW, GH])
+              if (!isFinite(v)) p.push('non-finite');
+            if (!(S.kt >= 0 && S.kt <= MAX_SL)) p.push('kt ' + S.kt);
+            if (!(S.win.t0 >= 0 && S.win.t1 <= T_MAX && S.win.t1 > S.win.t0))
+              p.push('window ' + S.win.t0 + '..' + S.win.t1);
+            if (!(ZOOMF >= ZMIN && ZOOMF <= ZMAX)) p.push('zoom ' + ZOOMF);
+            if (!(S.rot.phi >= -89 && S.rot.phi <= 89)) p.push('phi ' + S.rot.phi);
+            if (!S.themes.size) p.push('no themes');
+            if (S.selection !== null &&
+                !Object.prototype.hasOwnProperty.call(BY_Q, S.selection)) p.push('bad selection');
+            if (PTRS.size > 3) p.push('leaked pointers ' + PTRS.size);
+            const F = q();
+            if (F.idx.length !== F.n || F.events.length !== F.n) p.push('query inconsistent');
+            if (p.length) bad.push(what + ': ' + p.join(', '));
+          };
+          const acts = [
+            () => { const x = box.left + rnd() * box.width, y = box.top + rnd() * box.height;
+                    ptr(gcv, 'pointerdown', x, y, 1);
+                    for (let i = 0; i < 3; i++) ptr(gcv, 'pointermove', x + rnd() * 60 - 30, y, 1);
+                    ptr(gcv, 'pointerup', x, y, 1); },
+            () => ptr(gcv, 'pointermove', box.left + rnd() * box.width, box.top + rnd() * box.height, 9),
+            () => gcv.dispatchEvent(new WheelEvent('wheel',
+                    {deltaY: rnd() > 0.5 ? 120 : -120, bubbles: true, cancelable: true})),
+            () => { const y = rb.top + rnd() * rb.height;
+                    ptr(rcv, 'pointerdown', rb.left + 10, y, 2);
+                    ptr(rcv, 'pointermove', rb.left + 10, y + rnd() * 40 - 20, 2);
+                    ptr(rcv, 'pointerup', rb.left + 10, y, 2); },
+            () => { const x = cb.left + rnd() * cb.width;
+                    ptr(ccv, 'pointerdown', x, cb.top + 10, 3);
+                    ptr(ccv, 'pointermove', x + rnd() * 120 - 60, cb.top + 10, 3);
+                    ptr(ccv, 'pointerup', x, cb.top + 10, 3); },
+            () => ccv.dispatchEvent(new WheelEvent('wheel',
+                    {deltaY: rnd() > 0.5 ? 120 : -120, bubbles: true, cancelable: true})),
+            () => key(ccv, pick(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'])),
+            () => key(rcv, pick(['ArrowUp', 'ArrowDown', 'Home', 'End'])),
+            () => key(gcv, pick(['ArrowLeft', 'ArrowRight', '+', '-', 'Escape'])),
+            () => pick(['btn-cluster', 'btn-basemap', 'btn-plates', 'btn-allcov'])
+                    && document.getElementById(pick(['btn-cluster', 'btn-basemap',
+                         'btn-plates', 'btn-allcov'])).click(),
+            () => pick([...document.querySelectorAll('#presets button')]).click(),
+            () => { const c = pick([...document.querySelectorAll('#themes .theme')]); if (c) c.click(); },
+            () => { const sel = document.getElementById('lens');
+                    sel.value = pick([...sel.options]).value;
+                    sel.dispatchEvent(new Event('change', {bubbles: true})); },
+            () => chooseEvent((rnd() * NEV) | 0),
+            () => setSelection(rnd() > 0.5 ? EV[(rnd() * NEV) | 0].q : null),
+          ];
+          for (let i = 0; i < 600; i++) {
+            try { pick(acts)(); } catch (e) { bad.push('step ' + i + ' threw: ' + e); }
+            if (i % 25 === 0) {
+              try { renderNow(); } catch (e) { bad.push('render threw: ' + e); }
+              check('step ' + i);
+            }
+          }
+          renderNow(); check('final');
+          return {steps: 600, bad: bad.slice(0, 4), count: bad.length};
+        }""")
+        report.check("600 random interactions break no invariant",
+                     fuzz["count"] == 0, "; ".join(fuzz["bad"]) or "state stayed valid throughout")
+        report.check("600 random interactions raise no uncaught error",
+                     not page_errors, " | ".join(page_errors[:2]))
+
+        # reset to something sane for the checks that follow
+        page.evaluate("location.hash = ''; readHash(); syncControls(); applyZoom(); changed(); renderNow();")
+        page.wait_for_timeout(200)
+        page_errors.clear()
+
         # -------------------------------------------------------- URL state
         if page.evaluate("typeof writeHash === 'function'"):
             page.evaluate("setCoverage(12); S.rot.lam = 123; S.rot.phi = -33; writeHash(true);")

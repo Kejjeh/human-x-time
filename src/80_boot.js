@@ -93,7 +93,7 @@ const primaryOnly = e => e.button === 0 || e.pointerType === 'touch' || e.pointe
 
 gcv.addEventListener('pointerdown', e => {
   if (!primaryOnly(e)) return;
-  try { gcv.setPointerCapture(e.pointerId); } catch (_) { /* drag works without it */ }
+  capture(gcv, e);
   // A primary pointerdown means a gesture is starting with nothing else held, so
   // it is also the moment to forget any pointer whose "up" we never received.
   if (e.isPrimary) { PTRS.clear(); pinch = null; }
@@ -298,10 +298,24 @@ gcv.addEventListener('keydown', e => {
 /* -------------------------------------------------------------------- chron */
 let cDrag = null;
 const chronPos = e => { const r = ccv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+/* Capture is an optimisation; the drag is not.
+ *
+ * setPointerCapture throws NotFoundError for a pointer that is not active - a
+ * pointerdown racing a cancel, a synthesised event - and the globe has always
+ * wrapped it, with a note saying the drag works without it. These two did not,
+ * and here the throw is worse than noisy: the call sat above the assignment, so
+ * the handler died before cDrag or rDrag was ever set and the gesture simply
+ * did not happen. Measured against a stale pointer id: the globe still started
+ * its drag, the rail and the axis both started nothing and put an uncaught
+ * error on the page. Set the state first, then try to capture. */
+function capture(el, e) {
+  try { el.setPointerCapture(e.pointerId); } catch (_) { /* the drag works without it */ }
+}
+
 ccv.addEventListener('pointerdown', e => {
   if (!primaryOnly(e)) return;
-  ccv.setPointerCapture(e.pointerId);
   cDrag = { x: chronPos(e).x, t0: S.win.t0, t1: S.win.t1 };
+  capture(ccv, e);
 });
 ccv.addEventListener('pointermove', e => {
   if (!cDrag) return;
@@ -381,7 +395,8 @@ let rDrag = false;
 const railSet = e => { const r = rcv.getBoundingClientRect(); setCoverage(yToSl(e.clientY - r.top)); };
 rcv.addEventListener('pointerdown', e => {
   if (!primaryOnly(e)) return;
-  rcv.setPointerCapture(e.pointerId); rDrag = true; railSet(e);
+  rDrag = true; railSet(e);
+  capture(rcv, e);
 });
 rcv.addEventListener('pointermove', e => { if (rDrag) railSet(e); });
 rcv.addEventListener('pointerup', () => { rDrag = false; });
