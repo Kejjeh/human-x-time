@@ -56,7 +56,18 @@ function rebasePinch() {
   pinch = s ? { d0: s.d, z0: ZOOMF, mx: s.mx, my: s.my } : null;
 }
 
+/* Only the primary button drives anything.
+ *
+ * pointerdown fires for every button, so a right-click was a gesture: on the
+ * rail it set the coverage floor - measured jumping from 40 to 3 on a single
+ * right-click, which is the whole view - and on the globe a right-drag rotated
+ * 64 degrees, both while the context menu was opening over the top. Middle
+ * click starts autoscroll on the same event. e.button is 0 only for the primary
+ * one; e.buttons is a mask, and for pen and touch both read as primary. */
+const primaryOnly = e => e.button === 0 || e.pointerType === 'touch' || e.pointerType === 'pen';
+
 gcv.addEventListener('pointerdown', e => {
+  if (!primaryOnly(e)) return;
   try { gcv.setPointerCapture(e.pointerId); } catch (_) { /* drag works without it */ }
   // A primary pointerdown means a gesture is starting with nothing else held, so
   // it is also the moment to forget any pointer whose "up" we never received.
@@ -248,6 +259,7 @@ gcv.addEventListener('keydown', e => {
 let cDrag = null;
 const chronPos = e => { const r = ccv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 ccv.addEventListener('pointerdown', e => {
+  if (!primaryOnly(e)) return;
   ccv.setPointerCapture(e.pointerId);
   cDrag = { x: chronPos(e).x, t0: S.win.t0, t1: S.win.t1 };
 });
@@ -283,7 +295,10 @@ document.getElementById('presets').addEventListener('click', e => {
 /* --------------------------------------------------------------------- rail */
 let rDrag = false;
 const railSet = e => { const r = rcv.getBoundingClientRect(); setCoverage(yToSl(e.clientY - r.top)); };
-rcv.addEventListener('pointerdown', e => { rcv.setPointerCapture(e.pointerId); rDrag = true; railSet(e); });
+rcv.addEventListener('pointerdown', e => {
+  if (!primaryOnly(e)) return;
+  rcv.setPointerCapture(e.pointerId); rDrag = true; railSet(e);
+});
 rcv.addEventListener('pointermove', e => { if (rDrag) railSet(e); });
 rcv.addEventListener('pointerup', () => { rDrag = false; });
 rcv.addEventListener('pointercancel', () => { rDrag = false; });
