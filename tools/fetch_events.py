@@ -376,10 +376,22 @@ def main():
                       if c["key"] in [x[0] for x in CATEGORIES] else 999)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    class_qids = {k: classes[k]["qid"] for k in classes}
+    if a.merge and os.path.exists(OUT):
+        # Same truncation the class cache had: `classes` holds only what this
+        # run resolved, so `--only school --merge` wrote a one-entry map over a
+        # sixty-two-entry one. Nothing downstream reads it - pack_events builds
+        # from categories - which is exactly why it could shrink unnoticed, and
+        # exactly why it matters: this is the record of which QID each class
+        # name resolved to, and it is here to be reviewable in the diff.
+        merged = dict(json.load(open(OUT, encoding="utf-8")).get("classes", {}))
+        merged.update(class_qids)
+        class_qids = merged
+
     doc = {"events": out,
            "categories": cat_rows,
            "themes": THEMES,
-           "classes": {k: classes[k]["qid"] for k in classes}}
+           "classes": class_qids}
     if a.merge and prior_langs:
         # `langs` is the vocabulary every `m` mask is written against, and it is
         # written by fetch_languages.py, not here. Rebuilding the document

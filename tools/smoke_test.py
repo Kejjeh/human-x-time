@@ -441,6 +441,26 @@ def run(url, headed, report):
         report.check("the primary button still drags", abs(page.evaluate("S.rot.lam") - lam0) > 1,
                      f"lam {lam0:.1f} -> {page.evaluate('S.rot.lam'):.1f}")
 
+        # queryEvents reuses one index buffer and one events array across calls
+        # instead of allocating 153 KB a query. Nothing may hold a result across
+        # an invalidate(); this is the check that says so if something starts to.
+        reuse = page.evaluate("""() => {
+          const before = { kt: S.kt, t0: S.win.t0, t1: S.win.t1 };
+          S.kt = 1; S.win.t0 = 0; S.win.t1 = T_MAX; invalidate();
+          const a = q(), an = a.n, first = a.idx[0], ev0 = a.events[0];
+          S.kt = 200; invalidate();
+          const b = q();
+          const shrank = b.n < an;
+          S.kt = 1; invalidate();
+          const c = q();
+          const restored = c.n === an && c.idx[0] === first && c.events[0] === ev0;
+          S.kt = before.kt; S.win.t0 = before.t0; S.win.t1 = before.t1; invalidate();
+          return { shrank, restored, n: an };
+        }""")
+        report.check("re-querying the same state gives the same answer",
+                     reuse["shrank"] and reuse["restored"],
+                     f"{reuse['n']} events, unchanged across two intervening queries")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")
