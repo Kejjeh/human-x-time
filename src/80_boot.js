@@ -6,7 +6,9 @@ function markAll() { needGlobe = needChron = needRail = needPanel = true; }
 function changed() { invalidate(); markAll(); paintOnInput(); writeHash(); }
 
 function setCoverage(n) {
-  const v = Math.max(1, Math.min(MAX_SL, Math.round(n)));
+  // Zero is a real floor - see the note in 60_rail.js. It is the only one that
+  // admits the events no Wikipedia edition carries.
+  const v = Math.max(0, Math.min(MAX_SL, Math.round(n)));
   if (v === S.kt) return;
   S.kt = v; changed();
 }
@@ -329,12 +331,14 @@ rcv.addEventListener('keydown', e => {
   const f = e.shiftKey ? 1.6 : 1.15;
   if (e.key === 'ArrowUp' || e.key === 'ArrowRight') setCoverage(Math.max(S.kt + 1, S.kt * f));
   else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') setCoverage(Math.min(S.kt - 1, S.kt / f));
-  else if (e.key === 'Home') setCoverage(1);
+  else if (e.key === 'Home') setCoverage(0);
   else if (e.key === 'End') setCoverage(MAX_SL);
   else return;
   e.preventDefault();
 });
-document.getElementById('btn-allcov').addEventListener('click', () => setCoverage(1));
+// "Show all" means all. It used to mean all but the four events no edition
+// carries, which is the one thing on the rail worth reaching the bottom for.
+document.getElementById('btn-allcov').addEventListener('click', () => setCoverage(0));
 
 /* ----------------------------------------------------------------- controls */
 document.getElementById('themes').addEventListener('click', e => {
@@ -447,10 +451,12 @@ function render(dt) {
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`
+        : S.kt <= 0 ? 'No coverage floor: every event in this window is on the globe, including the ones no edition carries.'
         : `${F.belowCoverage.toLocaleString()} events in this window are remembered in fewer than ${S.kt} editions.`;
     document.getElementById('lens-hint').textContent = S.lens
       ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
       : 'Pick an edition to see what it does — or does not — cover.';
+    rcv.setAttribute('aria-valuemin', 0);
     rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
     ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));

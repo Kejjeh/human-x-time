@@ -461,6 +461,50 @@ def run(url, headed, report):
                      reuse["shrank"] and reuse["restored"],
                      f"{reuse['n']} events, unchanged across two intervening queries")
 
+        # Four events in the corpus are carried by no Wikipedia edition anywhere,
+        # and a floor of 1 excluded every one of them from every view the site
+        # could produce - so the header advertised 38,242 events of which 38,238
+        # were reachable. The floor goes to zero now, and "Show all" means all.
+        allcov = page.evaluate("""() => {
+          setWindow(0, T_MAX); S.themes = new Set(THEMES); S.lens = '';
+          document.getElementById('btn-allcov').click();
+          invalidate();
+          const shown = q().n;
+          let zero = 0;
+          for (let i = 0; i < NEV; i++) if (EVSL[i] === 0) zero++;
+          // and the survivor curve the rail draws has to agree with the query
+          let disagree = 0;
+          for (const k of [0, 1, 2, 3, 10, 40]) {
+            setCoverage(k); invalidate();
+            if (q().n !== survivorsAt(k)) disagree++;
+          }
+          setCoverage(0); invalidate();
+          return { shown, total: NEV, zero, disagree, floor: S.kt };
+        }""")
+        report.check("\"Show all\" reaches every event in the corpus",
+                     allcov["shown"] == allcov["total"] and allcov["floor"] == 0,
+                     f"{allcov['shown']:,} of {allcov['total']:,}, "
+                     f"{allcov['zero']} carried by no edition")
+        report.check("the rail's survivor curve matches the query at every floor",
+                     allcov["disagree"] == 0, f"{allcov['disagree']} floors disagree")
+
+        # Choosing a search result opens whatever is hiding it. It could not open
+        # a floor of 1 for an event with a coverage of 0: the result was selected,
+        # flown to, and shown in the panel with nothing on the globe.
+        reach = page.evaluate("""() => {
+          setCoverage(40); invalidate();
+          let i = -1;
+          for (let k = 0; k < NEV; k++) if (EVSL[k] === 0) { i = k; break; }
+          if (i < 0) return null;
+          chooseEvent(i); TW = null; invalidate();
+          return { name: EV[i].n, floor: S.kt, inQuery: q().events.includes(EV[i]),
+                   selected: S.selection === EV[i].q };
+        }""")
+        if reach:
+            report.check("choosing a result always opens what is hiding it",
+                         reach["inQuery"] and reach["selected"],
+                         f"{reach['name']!r} at floor {reach['floor']}")
+
         # ------------------------------------------------------------ search
         if page.evaluate("!!document.getElementById('search')"):
             page.fill("#search", "Pompeii")

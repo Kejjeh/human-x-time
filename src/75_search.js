@@ -101,7 +101,10 @@ function closeResults() {
 function chooseEvent(i) {
   const e = EV[i];
   if (!e) return;
-  if (e.sl < S.kt) S.kt = Math.max(1, e.sl);
+  // Math.max(1, ...) here meant an event carried by no edition at all could be
+  // chosen, flown to, and shown in the panel with no marker anywhere on the
+  // globe - the one case this function exists to prevent.
+  if (e.sl < S.kt) S.kt = e.sl;
   if (!S.themes.has(e.theme)) S.themes.add(e.theme);
   if (S.lens) {
     const [mode, lang] = S.lens.split(':');

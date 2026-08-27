@@ -356,7 +356,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
     </div>
     <canvas id="railcv" tabindex="0" role="slider"
             aria-label="Coverage floor: minimum number of Wikipedia language editions"
-            aria-valuemin="1" aria-valuemax="300" aria-valuenow="1"></canvas>
+            aria-valuemin="0" aria-valuemax="300" aria-valuenow="1"></canvas>
     <div class="rail-foot">
       <button class="iconbtn" id="btn-allcov">Show all</button>
     </div>
@@ -1688,25 +1688,41 @@ function resizeRail() {
 
 /* Sitelink counts are heavy-tailed — half the corpus sits under 27 editions and
    the top is near 300 — so the rail is logarithmic or the whole scale is spent
-   on a handful of capitals. */
+   on a handful of capitals.
+
+   The floor reaches ZERO, not one. Four events in the corpus are carried by no
+   Wikipedia edition anywhere - a Wikidata item, a date, a coordinate, and
+   silence - and a floor of 1 excluded every one of them from every view the
+   site can produce. They are the site's own thesis at its limit, and they were
+   the only events it could not show. The log scale cannot distinguish them
+   anyway: railU(0) and railU(1) are both 0, the same pixel, so admitting zero
+   costs nothing on screen and stops the header advertising 38,242 events of
+   which 38,238 are reachable. */
 const railU = n => Math.log(Math.max(1, n));
 const RAIL_MAX = () => railU(MAX_SL);
 function slToY(n) { return RPAD + (1 - railU(n) / RAIL_MAX()) * (RH - RPAD * 2); }
 function yToSl(y) {
   const f = 1 - (y - RPAD) / (RH - RPAD * 2);
-  return Math.round(Math.exp(Math.max(0, Math.min(1, f)) * RAIL_MAX()));
+  // Strictly below the track, not at its last pixel: railU(0) and railU(1) are
+  // both 0, so the bottom of the scale has to keep meaning 1 or a floor of 1
+  // stops being selectable by dragging. Past the end - into the foot padding,
+  // which the pointer can reach - means no floor at all.
+  if (f < 0) return 0;
+  return Math.round(Math.exp(Math.min(1, f) * RAIL_MAX()));
 }
 
-/* How many events survive each coverage floor, precomputed once. */
+/* How many events survive each coverage floor, precomputed once.
+   Down to zero, so the bottom of the rail counts the events no edition carries
+   rather than quietly dropping them out of the total. */
 const SURVIVORS = (() => {
   const counts = new Array(MAX_SL + 2).fill(0);
-  for (const e of EV) counts[Math.min(e.sl, MAX_SL)]++;
+  for (const e of EV) counts[Math.max(0, Math.min(e.sl, MAX_SL))]++;
   const cum = new Array(MAX_SL + 2).fill(0);
   let run = 0;
-  for (let n = MAX_SL; n >= 1; n--) { run += counts[n]; cum[n] = run; }
+  for (let n = MAX_SL; n >= 0; n--) { run += counts[n]; cum[n] = run; }
   return cum;
 })();
-const survivorsAt = n => SURVIVORS[Math.max(1, Math.min(MAX_SL, n))] || 0;
+const survivorsAt = n => SURVIVORS[Math.max(0, Math.min(MAX_SL, n))] || 0;
 
 function drawRail() {
   rx.clearRect(0, 0, RW, RH);
@@ -1984,7 +2000,10 @@ function closeResults() {
 function chooseEvent(i) {
   const e = EV[i];
   if (!e) return;
-  if (e.sl < S.kt) S.kt = Math.max(1, e.sl);
+  // Math.max(1, ...) here meant an event carried by no edition at all could be
+  // chosen, flown to, and shown in the panel with no marker anywhere on the
+  // globe - the one case this function exists to prevent.
+  if (e.sl < S.kt) S.kt = e.sl;
   if (!S.themes.has(e.theme)) S.themes.add(e.theme);
   if (S.lens) {
     const [mode, lang] = S.lens.split(':');
@@ -2151,7 +2170,7 @@ function readHash() {
        a view with a selection to one without left the selection on screen, and
        the debounced writeHash then put it back, silently rewriting the history
        entry the user had just returned to. */
-    S.kt = Math.round(num(p.c, 1, MAX_SL, 40));
+    S.kt = Math.round(num(p.c, 0, MAX_SL, 40));
 
     let t0 = 0, t1 = 3200;
     if (p.t) {
@@ -2224,7 +2243,9 @@ function markAll() { needGlobe = needChron = needRail = needPanel = true; }
 function changed() { invalidate(); markAll(); paintOnInput(); writeHash(); }
 
 function setCoverage(n) {
-  const v = Math.max(1, Math.min(MAX_SL, Math.round(n)));
+  // Zero is a real floor - see the note in 60_rail.js. It is the only one that
+  // admits the events no Wikipedia edition carries.
+  const v = Math.max(0, Math.min(MAX_SL, Math.round(n)));
   if (v === S.kt) return;
   S.kt = v; changed();
 }
@@ -2547,12 +2568,14 @@ rcv.addEventListener('keydown', e => {
   const f = e.shiftKey ? 1.6 : 1.15;
   if (e.key === 'ArrowUp' || e.key === 'ArrowRight') setCoverage(Math.max(S.kt + 1, S.kt * f));
   else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') setCoverage(Math.min(S.kt - 1, S.kt / f));
-  else if (e.key === 'Home') setCoverage(1);
+  else if (e.key === 'Home') setCoverage(0);
   else if (e.key === 'End') setCoverage(MAX_SL);
   else return;
   e.preventDefault();
 });
-document.getElementById('btn-allcov').addEventListener('click', () => setCoverage(1));
+// "Show all" means all. It used to mean all but the four events no edition
+// carries, which is the one thing on the rail worth reaching the bottom for.
+document.getElementById('btn-allcov').addEventListener('click', () => setCoverage(0));
 
 /* ----------------------------------------------------------------- controls */
 document.getElementById('themes').addEventListener('click', e => {
@@ -2665,10 +2688,12 @@ function render(dt) {
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`
+        : S.kt <= 0 ? 'No coverage floor: every event in this window is on the globe, including the ones no edition carries.'
         : `${F.belowCoverage.toLocaleString()} events in this window are remembered in fewer than ${S.kt} editions.`;
     document.getElementById('lens-hint').textContent = S.lens
       ? 'Filtering by which Wikipedia edition carries an article. Absence is a fact about the record, not about history.'
       : 'Pick an edition to see what it does — or does not — cover.';
+    rcv.setAttribute('aria-valuemin', 0);
     rcv.setAttribute('aria-valuemax', MAX_SL);
     rcv.setAttribute('aria-valuenow', S.kt);
     ccv.setAttribute('aria-valuenow', Math.round(S.win.t1));

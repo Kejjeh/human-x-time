@@ -83,7 +83,7 @@ function readHash() {
        a view with a selection to one without left the selection on screen, and
        the debounced writeHash then put it back, silently rewriting the history
        entry the user had just returned to. */
-    S.kt = Math.round(num(p.c, 1, MAX_SL, 40));
+    S.kt = Math.round(num(p.c, 0, MAX_SL, 40));
 
     let t0 = 0, t1 = 3200;
     if (p.t) {
