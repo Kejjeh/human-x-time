@@ -156,15 +156,27 @@ live query.
   there to make them visible rather than to correct them.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
-- **A UX review found twelve.** Six are done: a tap on a marker now answers with
-  the tooltip; the time axis takes the keyboard and both sliders say their value in
-  words; a swipe scrolls the page instead of flinging the globe to the pole; the
-  stage overlays clear AA in light mode; the globe's focus ring is visible; and a
-  search result scrolls the globe into view before flying to it. Still open: the
-  detail panel does not scroll itself into view when a marker is tapped (the
-  tooltip answers instead), a cluster resolves to one member and discards the rest
-  though the tooltip says "+7 more here", the panel is rebuilt whole on every state
-  change, the language chips are inert, and the page carries no `description`,
-  `og:` or favicon. See
-  [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers this
-  site and its sibling together.
+- **A UX review found twelve, and two of those are about the sibling site.** Of
+  the ten that apply here, **three are closed**: a swipe scrolls the page instead
+  of flinging the globe to the pole, the stage overlays clear AA in light mode,
+  and the keyboard reaches the time axis with both sliders announcing their value
+  in words rather than a bare number.
+
+  **Two are half-closed, and the open halves are the harder ones.** A tap on a
+  marker now answers with the tooltip, but the detail panel still does not scroll
+  itself into view — it is the third grid row on a narrow layout — and the cluster
+  cell floor is still 15px whether the globe is 128px across or 400. The 38,242-
+  element sort is gone from the panel, but the panel is still rebuilt whole on
+  every state change, and `#detail` is still `aria-live="polite"`, so a rail drag
+  re-announces the entire thing on every pointer event.
+
+  **Five are untouched.** A click inside the panel calls `setSelection` directly
+  and bypasses the forty lines that open whatever is hiding its target. A cluster
+  resolves to one member and discards the rest while the tooltip promises "+7 more
+  here". The 62 Wikidata categories are collapsed to six themes and never offered
+  as an axis, so "show me the other cathedrals" is unaskable of 1,205 of them.
+  There is no guided path. And the language chips are inert spans on a page that
+  carries no `description`, no `og:` tags and no favicon.
+
+  See [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers
+  this site and its sibling together.
