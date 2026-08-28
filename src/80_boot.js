@@ -108,7 +108,7 @@ gcv.addEventListener('pointerdown', e => {
     rebasePinch();
     return;
   }
-  gDrag = { x: e.clientX, y: e.clientY };
+  gDrag = { x: e.clientX, y: e.clientY, ax: 0, ay: 0 };
   gMoved = 0;
 });
 gcv.addEventListener('pointermove', e => {
@@ -128,6 +128,20 @@ gcv.addEventListener('pointermove', e => {
   if (gDrag) {
     const dx = e.clientX - gDrag.x, dy = e.clientY - gDrag.y;
     gMoved += Math.abs(dx) + Math.abs(dy);
+    /* Under a finger, let a vertical swipe be a scroll.
+       touch-action:pan-y hands the gesture back to the browser, but only once
+       the browser has decided - and the moves before that decision still arrive
+       here. Measured: a purely vertical 250px swipe still rotated 15 degrees of
+       latitude on its way to scrolling the page. So judge the gesture too, and
+       stay out of the way while it looks vertical. Once it has proved
+       horizontal, or once the browser has kept it, this never trips again. */
+    if (gDrag.pan === undefined && e.pointerType !== 'mouse') gDrag.pan = null;
+    if (gDrag.pan === null) {
+      gDrag.ax += Math.abs(dx); gDrag.ay += Math.abs(dy);
+      if (gDrag.ax + gDrag.ay < 10) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
+      gDrag.pan = gDrag.ax > gDrag.ay;          // horizontal enough to be a rotate
+    }
+    if (gDrag.pan === false) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
     const k = 180 / (GR * Math.PI) * 1.1;
     S.rot.lam += dx * k;
     S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + dy * k));
@@ -241,7 +255,9 @@ function releasePointer(e) {
   pinch = null;
   if (PTRS.size === 1) {
     const p = PTRS.values().next().value;
-    gDrag = { x: p.x, y: p.y, t: performance.now() };   // hand back without a jump
+    // hand back without a jump; the surviving finger is mid-gesture, so it does
+    // not have to re-prove which way it is going
+    gDrag = { x: p.x, y: p.y, t: performance.now(), ax: 0, ay: 0, pan: true };
     gMoved = 999; gVel.length = 0;
     return true;
   }
@@ -470,9 +486,28 @@ let last = performance.now(), lastPaint = 0, lastRafAt = -1e9, painting = false;
 let TW = null;
 function ease(t) { return t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
+/* Fly to something you can see.
+ *
+ * On a narrow layout the page scrolls and the stage is the first screen, so a
+ * search result chosen from the panel below could animate the globe entirely
+ * off-screen. Measured at 390x844 scrolled to 483: the stage sat at -483, the
+ * selection landed, the camera flew, and none of it was in the viewport.
+ * No-op on the desktop layout, where the document does not scroll at all. */
+function bringStageIntoView() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  if (document.documentElement.scrollHeight <= window.innerHeight + 1) return;
+  const r = stage.getBoundingClientRect();
+  if (r.top >= -4 && r.bottom <= window.innerHeight + 4) return;
+  try {
+    stage.scrollIntoView({ block: 'start', behavior: RM.matches ? 'auto' : 'smooth' });
+  } catch (_) { stage.scrollIntoView(true); }
+}
+
 function flyToEvent(i) {
   const e = EV[i];
   if (!e) return;
+  bringStageIntoView();
   let lam = -e.lng;
   while (lam - S.rot.lam > 180) lam -= 360;
   while (lam - S.rot.lam < -180) lam += 360;

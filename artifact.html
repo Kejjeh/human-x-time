@@ -46,6 +46,17 @@
   --font-body:    'xt-sans', 'IBM Plex Sans', system-ui, sans-serif;
   --font-data:    'xt-mono', 'IBM Plex Mono', ui-monospace, Consolas, monospace;
 
+  /* The stage carries a near-black gradient in BOTH themes - it is declared
+     once and never overridden - so text drawn over it must not follow the
+     theme's ink. In light mode --chalk-dim is #5D5449, which measures 2.53:1
+     against that gradient: the sub-line explaining what the coverage axis
+     means, below AA at 12px, for every sighted visitor in light mode. These
+     three are fixed to the dark-theme values because the ground they sit on is
+     fixed too. */
+  --stage-fg:     #E8E3DC;
+  --stage-fg-dim: #A79E93;
+  --stage-accent: #D9A441;
+
   --rail-w: 112px;
   --panel-w: 340px;
   --r: 2px;
@@ -230,13 +241,18 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .nearby .t { font-size:11.5px; color:var(--chalk); }
 
 /* ================================================================== STAGE */
+/* Inset, because the ring would otherwise be invisible. :focus-visible paints
+   2px OUTSIDE the border box, #globe is 100% of .stage, and .stage is
+   overflow:hidden - so every pixel of the ring was clipped, on a
+   role="application" element whose arrow keys the page cannot see being used. */
 #globe { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+#globe:focus-visible { outline:2px solid var(--stage-accent); outline-offset:-3px; }
 #globe.dragging { cursor:grabbing; }
 .stage-tl { position:absolute; top:12px; left:14px; pointer-events:none; max-width:62%; }
 .headline { font-family:var(--font-display); text-transform:uppercase; letter-spacing:.14em;
-  font-size:10px; color:var(--chalk-faint); }
-.headline b { color:var(--amber); font-family:var(--font-data); letter-spacing:0; font-size:12px; }
-.sub { margin:4px 0 0; font-size:12px; color:var(--chalk-dim); line-height:1.5; max-width:54ch;
+  font-size:10px; color:var(--stage-fg-dim); }
+.headline b { color:var(--stage-accent); font-family:var(--font-data); letter-spacing:0; font-size:12px; }
+.sub { margin:4px 0 0; font-size:12px; color:var(--stage-fg); line-height:1.5; max-width:54ch;
   text-wrap:balance; }
 .stage-tr { position:absolute; top:10px; right:12px; display:flex; gap:6px; }
 .iconbtn { border:1px solid var(--rule); border-radius:var(--r); padding:5px 9px;
@@ -293,6 +309,22 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
   .chron { grid-column:1; grid-row:2; }
   .instrument { grid-column:1 / span 2; grid-row:3; border-right:none; border-top:1px solid var(--rule); }
   .detail { overflow:visible; }
+}
+/* A finger's first instinct on a narrow layout is to swipe up and read on. All
+   three canvases took touch-action:none, so that swipe never reached the page:
+   measured at 390x844, a 250px upward swipe on the globe took the latitude from
+   12 to -89 - clamped at the pole - with scrollY still 0. The top of the first
+   screen refused to scroll and silently rewrote the view instead.
+   pan-y hands vertical gestures back to the browser; horizontal ones still
+   reach the handlers, so the globe still rotates and the time axis still pans.
+   The trade, taken deliberately: the rail's vertical drag-scrub is gone under a
+   finger, because its whole gesture is the one being given back. Tapping a
+   height on the rail still sets the floor, and "Show all", the keyboard and the
+   URL all still reach every value. An unrequested jump to the pole is worse
+   than losing a scrub. The pinch path is untouched - it needs two pointers -
+   and the pointercancel bookkeeping already handles the browser taking over. */
+@media (pointer: coarse) {
+  #globe, #railcv, #chroncv { touch-action: pan-y; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition-duration:.01ms !important; animation-duration:.01ms !important; } }
 </style>
@@ -2427,7 +2459,7 @@ gcv.addEventListener('pointerdown', e => {
     rebasePinch();
     return;
   }
-  gDrag = { x: e.clientX, y: e.clientY };
+  gDrag = { x: e.clientX, y: e.clientY, ax: 0, ay: 0 };
   gMoved = 0;
 });
 gcv.addEventListener('pointermove', e => {
@@ -2447,6 +2479,20 @@ gcv.addEventListener('pointermove', e => {
   if (gDrag) {
     const dx = e.clientX - gDrag.x, dy = e.clientY - gDrag.y;
     gMoved += Math.abs(dx) + Math.abs(dy);
+    /* Under a finger, let a vertical swipe be a scroll.
+       touch-action:pan-y hands the gesture back to the browser, but only once
+       the browser has decided - and the moves before that decision still arrive
+       here. Measured: a purely vertical 250px swipe still rotated 15 degrees of
+       latitude on its way to scrolling the page. So judge the gesture too, and
+       stay out of the way while it looks vertical. Once it has proved
+       horizontal, or once the browser has kept it, this never trips again. */
+    if (gDrag.pan === undefined && e.pointerType !== 'mouse') gDrag.pan = null;
+    if (gDrag.pan === null) {
+      gDrag.ax += Math.abs(dx); gDrag.ay += Math.abs(dy);
+      if (gDrag.ax + gDrag.ay < 10) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
+      gDrag.pan = gDrag.ax > gDrag.ay;          // horizontal enough to be a rotate
+    }
+    if (gDrag.pan === false) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
     const k = 180 / (GR * Math.PI) * 1.1;
     S.rot.lam += dx * k;
     S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + dy * k));
@@ -2560,7 +2606,9 @@ function releasePointer(e) {
   pinch = null;
   if (PTRS.size === 1) {
     const p = PTRS.values().next().value;
-    gDrag = { x: p.x, y: p.y, t: performance.now() };   // hand back without a jump
+    // hand back without a jump; the surviving finger is mid-gesture, so it does
+    // not have to re-prove which way it is going
+    gDrag = { x: p.x, y: p.y, t: performance.now(), ax: 0, ay: 0, pan: true };
     gMoved = 999; gVel.length = 0;
     return true;
   }
@@ -2789,9 +2837,28 @@ let last = performance.now(), lastPaint = 0, lastRafAt = -1e9, painting = false;
 let TW = null;
 function ease(t) { return t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
+/* Fly to something you can see.
+ *
+ * On a narrow layout the page scrolls and the stage is the first screen, so a
+ * search result chosen from the panel below could animate the globe entirely
+ * off-screen. Measured at 390x844 scrolled to 483: the stage sat at -483, the
+ * selection landed, the camera flew, and none of it was in the viewport.
+ * No-op on the desktop layout, where the document does not scroll at all. */
+function bringStageIntoView() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  if (document.documentElement.scrollHeight <= window.innerHeight + 1) return;
+  const r = stage.getBoundingClientRect();
+  if (r.top >= -4 && r.bottom <= window.innerHeight + 4) return;
+  try {
+    stage.scrollIntoView({ block: 'start', behavior: RM.matches ? 'auto' : 'smooth' });
+  } catch (_) { stage.scrollIntoView(true); }
+}
+
 function flyToEvent(i) {
   const e = EV[i];
   if (!e) return;
+  bringStageIntoView();
   let lam = -e.lng;
   while (lam - S.rot.lam > 180) lam -= 360;
   while (lam - S.rot.lam < -180) lam += 360;

@@ -831,6 +831,56 @@ def run(url, headed, report):
         report.check("the globe stays drawn across every view state",
                      live["minCol"] > 40, f"fewest colours seen: {live['minCol']}")
 
+        # Text drawn over the stage must not follow the theme's ink: the stage
+        # gradient is near-black in both themes, and in light mode --chalk-dim
+        # measured 2.53:1 against it, on the line explaining the coverage axis.
+        contrast = page.evaluate("""() => {
+          const root = document.documentElement;
+          const had = root.getAttribute('data-theme');
+          root.setAttribute('data-theme', 'light');
+          const px = c => c.match(/[\\d.]+/g).slice(0, 3).map(Number);
+          const lum = v => { const a = v.map(x => { x /= 255;
+            return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+            return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]; };
+          const bg = [10, 18, 32];                       // the stage gradient's light end
+          const out = {};
+          for (const sel of ['#hd-sub', '.stage-tl .headline']) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+            const L1 = lum(px(getComputedStyle(el).color)), L2 = lum(bg);
+            out[sel] = +(((Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05))).toFixed(2);
+          }
+          if (had) root.setAttribute('data-theme', had); else root.removeAttribute('data-theme');
+          readPalette(); SURF.key = ''; markAll(); renderNow();
+          return out;
+        }""")
+        worst = min(contrast.values()) if contrast else 0
+        report.check("stage overlay text clears AA in light mode", worst >= 4.5,
+                     ", ".join(f"{k} {v}:1" for k, v in contrast.items()))
+
+        # :focus-visible paints outside the border box, #globe fills .stage and
+        # .stage is overflow:hidden - so the ring was clipped away entirely, on a
+        # role="application" element that takes arrow keys.
+        # :focus-visible only matches keyboard-initiated focus, so the resolved
+        # style of a scripted focus() says nothing. Read the rule itself.
+        ring = page.evaluate("""() => {
+          let offset = null;
+          for (const sheet of document.styleSheets) {
+            let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
+            for (const r of rules)
+              if (r.selectorText && /#globe:focus-visible/.test(r.selectorText))
+                offset = r.style.outlineOffset;
+          }
+          return {offset, clipped:
+            getComputedStyle(document.getElementById('stage')).overflow === 'hidden' &&
+            gcv.clientWidth >= document.getElementById('stage').clientWidth};
+        }""")
+        report.check("the globe's focus ring is drawn inside the canvas",
+                     not ring["clipped"] or
+                     (ring["offset"] and parseable_negative(ring["offset"])),
+                     f"#globe:focus-visible outline-offset {ring['offset']!r}"
+                     f" in an overflow:hidden stage")
+
         # ------------------------------------------------------- the fuzz
         # A deterministic random walk over every control there is, checking the
         # invariants after every 25 steps. This is what found the unguarded
@@ -921,6 +971,85 @@ def run(url, headed, report):
         page.wait_for_timeout(200)
         page_errors.clear()
 
+        # A finger's first instinct on a narrow layout is to swipe up and read on.
+        # All three canvases took touch-action:none, so a 250px upward swipe took
+        # the latitude from 12 to -89 with scrollY still 0 - the top of the first
+        # screen refused to scroll and rewrote the view instead. Two halves: the
+        # stylesheet hands vertical gestures back to the browser under a coarse
+        # pointer, and the handler stays out of the way while a gesture still
+        # looks vertical, because the moves before the browser decides still
+        # arrive here. This context has no touch emulation, so the gesture is
+        # driven straight at the handler with the pointerType it keys on.
+        rule = page.evaluate("""() => {
+          for (const sheet of document.styleSheets) {
+            let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
+            for (const r of rules) {
+              if (r.media && /coarse/.test(r.conditionText || r.media.mediaText))
+                for (const inner of r.cssRules || [])
+                  if (/#globe/.test(inner.selectorText || ''))
+                    return {sel: inner.selectorText, touchAction: inner.style.touchAction};
+            }
+          }
+          return null;
+        }""")
+        report.check("a coarse pointer gets the page's vertical gestures back",
+                     bool(rule) and rule["touchAction"] == "pan-y",
+                     f"{rule['sel']} -> touch-action: {rule['touchAction']}" if rule
+                     else "no coarse-pointer rule for #globe")
+
+        drag = page.evaluate("""() => {
+          const box = gcv.getBoundingClientRect();
+          const go = (path, type) => {
+            S.rot.phi = 12; S.rot.lam = -10; S.spin.lam = 0; S.spin.phi = 0;
+            gcv.dispatchEvent(new PointerEvent('pointerdown', {clientX: box.left + path[0][0],
+              clientY: box.top + path[0][1], bubbles: true, pointerId: 40,
+              pointerType: type, isPrimary: true, button: 0}));
+            for (const [x, y] of path.slice(1))
+              gcv.dispatchEvent(new PointerEvent('pointermove', {clientX: box.left + x,
+                clientY: box.top + y, bubbles: true, pointerId: 40, pointerType: type}));
+            gcv.dispatchEvent(new PointerEvent('pointerup', {clientX: box.left + path[path.length-1][0],
+              clientY: box.top + path[path.length-1][1], bubbles: true, pointerId: 40,
+              pointerType: type}));
+            S.spin.lam = 0; S.spin.phi = 0;
+            return {phi: S.rot.phi, lam: S.rot.lam};
+          };
+          const down = [[200,120],[200,150],[200,180],[200,210],[200,240],[200,270]];
+          const across = [[120,200],[160,200],[200,200],[240,200],[280,200],[320,200]];
+          return {touchVertical: go(down, 'touch'), touchHorizontal: go(across, 'touch'),
+                  mouseVertical: go(down, 'mouse')};
+        }""")
+        tv, th, mv = drag["touchVertical"], drag["touchHorizontal"], drag["mouseVertical"]
+        report.check("a vertical swipe leaves the globe where it was",
+                     abs(tv["phi"] - 12) < 0.5 and abs(tv["lam"] + 10) < 0.5,
+                     f"latitude 12 -> {tv['phi']:.1f}, longitude -10 -> {tv['lam']:.1f}")
+        report.check("a horizontal drag still turns the globe",
+                     abs(th["lam"] + 10) > 3,
+                     f"longitude -10 -> {th['lam']:.1f}")
+        report.check("a mouse drag is unaffected by the touch guard",
+                     abs(mv["phi"] - 12) > 3,
+                     f"latitude 12 -> {mv['phi']:.1f}")
+
+        # Flying to a search result while the stage is scrolled out of view
+        # animates the camera where nobody can see it.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(500)
+        page.evaluate("window.scrollTo(0, 500);")
+        page.wait_for_timeout(200)
+        scrolled = page.evaluate("Math.round(document.getElementById('stage').getBoundingClientRect().top)")
+        page.evaluate("chooseEvent(0)")
+        page.wait_for_timeout(900)
+        back = page.evaluate("({top: Math.round(document.getElementById('stage')"
+                             ".getBoundingClientRect().top), sel: S.selection})")
+        report.check("choosing a result brings the globe into view first",
+                     scrolled < -50 and back["top"] > -8 and back["sel"] is not None,
+                     f"stage top {scrolled}px before, {back['top']}px after")
+
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.wait_for_timeout(400)
+        page.evaluate("location.hash=''; readHash(); syncControls(); applyZoom(); changed(); renderNow();")
+        page.wait_for_timeout(200)
+        page_errors.clear()
+
         # -------------------------------------------------------- URL state
         if page.evaluate("typeof writeHash === 'function'"):
             page.evaluate("setCoverage(12); S.rot.lam = 123; S.rot.phi = -33; writeHash(true);")
@@ -988,6 +1117,14 @@ def wrap_artifact():
                 '<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
                 '</head>\n<body>\n' + body + '\n</body>\n</html>\n')
     return ARTIFACT_WRAPPER
+
+
+def parseable_negative(css_len):
+    """True when a CSS length string is a negative number of pixels."""
+    try:
+        return float(str(css_len).replace("px", "").strip()) < 0
+    except ValueError:
+        return False
 
 
 def main():
