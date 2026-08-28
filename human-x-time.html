@@ -134,6 +134,7 @@ button { background: none; border: none; cursor: pointer; padding: 0; }
 .instrument { grid-column:1; grid-row:1 / span 2; border-right:1px solid var(--rule);
   background: var(--panel); display:flex; flex-direction:column; min-height:0; }
 .stage { grid-column:2; grid-row:1; position:relative; min-height:0; overflow:hidden;
+  container-type:inline-size;
   background: radial-gradient(ellipse at 50% 45%, #0a1220 0%, #05080e 60%, #03050a 100%); }
 .rail { grid-column:3; grid-row:1 / span 2; border-left:1px solid var(--rule);
   background: var(--panel); display:flex; flex-direction:column; }
@@ -304,7 +305,16 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .presets button:hover { background:var(--panel-3); color:var(--chalk); }
 #chroncv { display:block; width:100%; touch-action:none; cursor:crosshair; }
 
-@media (max-width: 1080px) { :root { --panel-w:290px; --rail-w:92px; } }
+@media (max-width: 1080px) {
+  :root { --panel-w:290px; --rail-w:92px; }
+  /* "Remembered" is one word and cannot wrap, and at .14em of tracking it is
+     86px wide inside a 71px content box once the rail narrows to 92px - so the
+     rail's own heading was clipped mid-word from 1080px down. Tracking alone
+     only got it to 74px; the other 8px come from the padding, which the narrow
+     rail can spare. The type stays at 10px. */
+  .rail-head { padding-left:6px; padding-right:6px; }
+  .rail-head .lbl { letter-spacing:.02em; }
+}
 @media (max-width: 860px) {
   body { overflow:auto; }
   .app { grid-template-columns:minmax(0,1fr) var(--rail-w); grid-template-rows:44vh auto auto;
@@ -314,6 +324,21 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
   .chron { grid-column:1; grid-row:2; }
   .instrument { grid-column:1 / span 2; grid-row:3; border-right:none; border-top:1px solid var(--rule); }
   .detail { overflow:visible; }
+}
+
+/* Below the buttons, not behind them.
+   .stage-tr is shrink-to-fit anchored right and .stage-tl is anchored left; on a
+   wide stage they never meet. Narrow the stage and they do - measured at 390px,
+   .stage-tl at y 12-105 against .stage-tr at y 10-36, with "Remembered in 40+
+   languages" entirely hidden behind Cluster and Satellite and only the tail
+   escaping below.
+   Keyed to the STAGE, not the viewport, because that is what actually decides
+   it: the button row is ~286px and the headline asks for 62% of the stage, so
+   they collide below about 690px of stage - which a 1000px window reaches with
+   a 92px rail, and a 1100px window reaches with a 112px one. Two viewport
+   breakpoints would have missed both. */
+@container (max-width: 700px) {
+  .stage-tl { top:52px; max-width:calc(100% - 28px); }
 }
 /* A finger's first instinct on a narrow layout is to swipe up and read on. All
    three canvases took touch-action:none, so that swipe never reached the page:

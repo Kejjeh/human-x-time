@@ -881,6 +881,62 @@ def run(url, headed, report):
                      f"#globe:focus-visible outline-offset {ring['offset']!r}"
                      f" in an overflow:hidden stage")
 
+        # The stage overlays must not sit on top of each other.
+        #
+        # There is already a check that no globe LABEL is drawn under these two
+        # panels. Nothing checked the panels against each other, and they
+        # collided: .stage-tr is shrink-to-fit anchored right, .stage-tl is
+        # anchored left and asks for 62% of the stage, so below about 690px of
+        # stage the headline sits behind the button row. At 390px it was
+        # completely hidden. Twenty waves of checks missed it; a screenshot did
+        # not, which is why the sweep is over widths rather than one viewport.
+        overlays = page.evaluate("""() => {
+          const box = el => { const q = el.getBoundingClientRect();
+            return {l: q.left, t: q.top, r: q.right, b: q.bottom}; };
+          const tl = box(document.querySelector('.stage-tl'));
+          const tr = box(document.querySelector('.stage-tr'));
+          const st = box(document.getElementById('stage'));
+          const rh = document.querySelector('.rail-head .lbl');
+          return {overlap: tl.l < tr.r && tl.r > tr.l && tl.t < tr.b && tl.b > tr.t,
+                  inside: tl.l >= st.l - 1 && tl.r <= st.r + 1 &&
+                          tl.t >= st.t - 1 && tl.b <= st.b + 1,
+                  headingClipped: rh.scrollWidth > rh.clientWidth + 1,
+                  headingW: rh.scrollWidth, boxW: rh.clientWidth,
+                  stageW: Math.round(st.r - st.l)};
+        }""")
+        widths = [(390, 844), (700, 900), (1000, 900), (1100, 900), (1440, 900)]
+        bad, clipped = [], []
+        for w, h in widths:
+            page.set_viewport_size({"width": w, "height": h})
+            page.wait_for_timeout(320)
+            o = page.evaluate("""() => {
+              const box = el => { const q = el.getBoundingClientRect();
+                return {l: q.left, t: q.top, r: q.right, b: q.bottom}; };
+              const tl = box(document.querySelector('.stage-tl'));
+              const tr = box(document.querySelector('.stage-tr'));
+              const st = box(document.getElementById('stage'));
+              const rh = document.querySelector('.rail-head .lbl');
+              return {overlap: tl.l < tr.r && tl.r > tr.l && tl.t < tr.b && tl.b > tr.t,
+                      inside: tl.l >= st.l - 1 && tl.r <= st.r + 1 &&
+                              tl.t >= st.t - 1 && tl.b <= st.b + 1,
+                      clipped: rh.scrollWidth > rh.clientWidth + 1,
+                      hw: rh.scrollWidth, bw: rh.clientWidth,
+                      stageW: Math.round(st.r - st.l)};
+            }""")
+            if o["overlap"] or not o["inside"]:
+                bad.append(f"{w}px (stage {o['stageW']})")
+            if o["clipped"]:
+                clipped.append(f"{w}px: {o['hw']}/{o['bw']}px")
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.wait_for_timeout(400)
+        report.check("the stage overlays never sit on top of each other",
+                     not bad,
+                     "collide at " + ", ".join(bad) if bad
+                     else f"clear at {len(widths)} widths, stage 298 to 988px")
+        report.check("the rail heading is never clipped mid-word",
+                     not clipped,
+                     "; ".join(clipped) or "fits at every rail width")
+
         # ------------------------------------------------------- the fuzz
         # A deterministic random walk over every control there is, checking the
         # invariants after every 25 steps. This is what found the unguarded
