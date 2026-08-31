@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 86 checks, run against both built documents and wired into the build as a gate. The sibling
+outside, whether it works — 93 checks, run against both built documents and wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
@@ -157,26 +157,27 @@ live query.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
 - **A UX review found twelve, and two of those are about the sibling site.** Of
-  the ten that apply here, **four are closed**: a swipe scrolls the page instead
+  the ten that apply here, **five are closed**: a swipe scrolls the page instead
   of flinging the globe to the pole, the stage overlays clear AA in light mode,
   the keyboard reaches the time axis with both sliders announcing their value
-  in words rather than a bare number, and a cluster now names what is inside it
-  — the panel lists the cell's members, in the same count the tooltip printed.
+  in words rather than a bare number, a cluster now names what is inside it —
+  the panel lists the cell's members, in the same count the tooltip printed —
+  and the 62 Wikidata categories are a real axis, so "show me the other 1,204
+  cathedrals" is one click on the tag.
 
-  **Two are half-closed, and the open halves are the harder ones.** A tap on a
-  marker now answers with the tooltip, but the detail panel still does not scroll
-  itself into view — it is the third grid row on a narrow layout — and the cluster
-  cell floor is still 15px whether the globe is 128px across or 400. The 38,242-
-  element sort is gone from the panel, but the panel is still rebuilt whole on
-  every state change, and `#detail` is still `aria-live="polite"`, so a rail drag
-  re-announces the entire thing on every pointer event.
+  **Three are half-closed.** A tap on a marker now answers with the tooltip, but
+  the detail panel still does not scroll itself into view — it is the third grid
+  row on a narrow layout — and the cluster cell floor is still 15px whether the
+  globe is 128px across or 400. The 38,242-element sort is gone from the panel,
+  but the panel is still rebuilt whole on every state change, and `#detail` is
+  still `aria-live="polite"`, so a rail drag re-announces the entire thing on
+  every pointer event. And the language codes that carry an article are live
+  links now, on a page that still has no `description`, no `og:` tags and no
+  favicon.
 
-  **Four are untouched.** A click inside the panel calls `setSelection` directly
-  and bypasses the forty lines that open whatever is hiding its target. The 62
-  Wikidata categories are collapsed to six themes and never offered as an axis,
-  so "show me the other cathedrals" is unaskable of 1,205 of them. There is no
-  guided path. And the language chips are inert spans on a page that carries no
-  `description`, no `og:` tags and no favicon.
+  **Two are untouched.** A click inside the panel calls `setSelection` directly
+  and bypasses the forty lines that open whatever is hiding its target. And
+  there is no guided path.
 
   See [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers
   this site and its sibling together.

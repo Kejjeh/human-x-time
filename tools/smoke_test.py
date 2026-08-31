@@ -251,6 +251,100 @@ def run(url, headed, report):
                      f"whole corpus {lens['all']}, on English {lens['only']}, "
                      f"not on English {lens['not']}")
 
+        # The category is a fourth axis of the SAME query, not a second
+        # filtering path - that distinction is the one thing 30_query.js exists
+        # to protect, so it is checked rather than asserted in a comment.
+        cat = page.evaluate("""() => {
+          const st = { cat: S.cat, kt: S.kt, w: { ...S.win }, th: new Set(S.themes) };
+          S.kt = 1; S.win = { t0: 0, t1: T_MAX }; S.themes = new Set(THEMES);
+          S.cat = ''; invalidate();
+          const before = q().catCounts[CAT_IX.cathedral];
+          S.cat = 'cathedral'; invalidate();
+          const F = q();
+          /* every other category must still report its own count: the tally has
+             to sit above the category test, or pinning one zeroes all 61 others
+             and the control can never be changed to a different one */
+          let nonZero = 0;
+          for (let i = 0; i < CATS.length; i++) if (F.catCounts[i] > 0) nonZero++;
+          const pure = F.events.every(e => e.c === 'cathedral');
+          /* pinning must survive its parent theme being off, or the globe empties
+             with the cause two controls away */
+          S.cat = ''; S.themes = new Set(THEMES.filter(t => t !== 'building'));
+          invalidate();
+          setCategory('cathedral');
+          const withThemeOff = q().n;
+          const themeOn = S.themes.has('building');
+          S.cat = st.cat; S.kt = st.kt; S.win = st.w; S.themes = st.th; invalidate();
+          return { before, n: F.n, counted: F.catCounts[CAT_IX.cathedral], pure,
+                   nonZero, cats: CATS.length, withThemeOff, themeOn,
+                   dropped: F.catDropped };
+        }""")
+        report.check("pinning a category is one axis of the one query",
+                     cat["pure"] and cat["n"] == cat["before"] and cat["n"] > 0,
+                     f"{cat['n']} events, all of them cathedrals, "
+                     f"against {cat['before']} counted before the pin")
+        report.check("a pinned category still counts the other 61",
+                     cat["nonZero"] == cat["cats"],
+                     f"{cat['nonZero']} of {cat['cats']} categories report a count")
+        report.check("pinning a category opens the theme that carries it",
+                     cat["themeOn"] and cat["withThemeOff"] == cat["n"],
+                     f"{cat['withThemeOff']} events with the theme switched off first")
+
+        # CATS is an Array, so an own-property test would accept "length" and
+        # every index in it: #ct=3 would pin whatever category came fourth.
+        cat_hostile = []
+        for bad in ("length", "3", "0", "constructor", "__proto__", "toString", "%FF"):
+            page.evaluate(f"location.hash = '#ct={bad}'")
+            page.wait_for_timeout(90)
+            cat_hostile.append((bad, page.evaluate("S.cat")))
+        report.check("a hostile category in the URL pins nothing",
+                     all(v == "" for _, v in cat_hostile),
+                     ", ".join(f"{k}->{v!r}" for k, v in cat_hostile if v != "") or "all seven rejected")
+        page.evaluate("location.hash = ''")
+        page.wait_for_timeout(120)
+
+        # A pinned category cannot be widened to admit a search result the way a
+        # theme can, so choosing one outside it has to unpin it - otherwise the
+        # result is selected, flown to, and has no marker anywhere.
+        unpin = page.evaluate("""() => {
+          S.cat = 'cathedral'; S.kt = 1; invalidate();
+          const other = EV.findIndex(e => e.c !== 'cathedral');
+          chooseEvent(other);
+          const ok = S.cat === '' && q().events.some(e => e.q === S.selection);
+          S.cat = ''; setSelection(null);
+          return ok;
+        }""")
+        report.check("choosing a result outside the pinned category unpins it", unpin)
+
+        # 43 codes under "Who remembers it" were inert spans on the one site whose
+        # whole argument is which editions carry an article.
+        page.evaluate("""() => { S.kt = 1; S.win = { t0: 0, t1: T_MAX };
+          const e = EV.find(x => (x.m & LANG_BIT.en) && x.sl > 20);
+          setSelection(e.q); renderNow(); }""")
+        page.wait_for_timeout(200)
+        chips = page.evaluate("""() => {
+          const e = BY_Q[S.selection];
+          const links = [...document.querySelectorAll('#detail .langs a')];
+          const dead = [...document.querySelectorAll('#detail .langs span.miss')];
+          let have = 0;
+          for (const l of LANGS) if (e.m & LANG_BIT[l]) have++;
+          return { links: links.length, have, dead: dead.length,
+                   href: links.length ? links[0].getAttribute('href') : '',
+                   text: links.length ? links[0].textContent.trim() : '',
+                   blank: links.every(a => a.rel.includes('noopener')) };
+        }""")
+        report.check("a carried edition is a link and a missing one is not",
+                     chips["links"] == chips["have"] and chips["links"] > 0 and chips["dead"] > 0,
+                     f"{chips['links']} links for {chips['have']} carried, "
+                     f"{chips['dead']} struck through")
+        report.check("the edition link addresses a wiki, not a language code",
+                     chips["href"] == ("https://www.wikidata.org/wiki/Special:GoToLinkedPage/"
+                                       + chips["text"] + "wiki/" + page.evaluate("S.selection"))
+                     and chips["blank"],
+                     chips["href"])
+        page.evaluate("setSelection(null)")
+        page.wait_for_timeout(100)
+
         # ------------------------------------------------------- interaction
         lam0 = page.evaluate("S.rot.lam")
         r0 = page.evaluate("window.__renders")

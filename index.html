@@ -218,9 +218,26 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .empty li { margin-bottom:4px; }
 
 .dt-head { padding:14px 16px 12px; border-bottom:1px solid var(--rule); }
+/* The pinned-category chip. One row, only ever present when a category is
+   actually pinned - 62 rows of anything above `.detail { flex:1 1 auto }` would
+   squeeze the panel to nothing, which is why the roster is not rendered here. */
+.catpin:empty { display:none; }
+.catpin { margin-top:8px; }
+.catpin button { display:inline-flex; align-items:center; gap:7px; max-width:100%;
+  font-family:var(--font-display); text-transform:uppercase; letter-spacing:.1em;
+  font-size:9.5px; padding:4px 8px; border-radius:3px; cursor:pointer;
+  background:var(--panel-3); color:var(--amber); border:1px solid var(--amber-d); }
+.catpin button:hover { background:var(--panel-2); }
+.catpin button .n { font-family:var(--font-data); letter-spacing:0; color:var(--chalk-dim); }
+.catpin button .x { font-size:12px; line-height:1; color:var(--chalk-dim); }
 .dt-head .tag { font-family:var(--font-display); text-transform:uppercase; letter-spacing:.12em;
   font-size:9.5px; padding:2px 6px; border:1px solid var(--rule); border-radius:var(--r);
   color:var(--chalk-faint); }
+/* The category on a selected event is a control, not a caption: it pins that
+   Wikidata class as an axis. It has to look pressable without becoming a second
+   accent - the palette keeps amber for coverage. */
+.dt-head button.tag { cursor:pointer; background:transparent; }
+.dt-head button.tag:hover { background:var(--panel-3); }
 .dt-head h2 { margin:8px 0 0; font-size:18px; font-weight:600; font-family:var(--font-display);
   line-height:1.2; text-wrap:balance; }
 .dt-head .when { margin:6px 0 0; font-family:var(--font-data); font-size:15px; color:var(--amber);
@@ -233,7 +250,19 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .langbar i { display:block; height:100%; background:var(--amber); }
 .barnote { font-size:9.5px; color:var(--chalk-faint); margin:-4px 0 8px; letter-spacing:0; }
 .langs { display:flex; flex-wrap:wrap; gap:3px; }
-.langs span { font-family:var(--font-data); font-size:9.5px; padding:1px 4px; border-radius:2px;
+/* A code that carries an article is a link; one that does not is a span. That
+   difference is the coverage argument made tactile in the one place a reader is
+   already looking at it, so the two have to stay visually one row - same size,
+   same padding, no underline - and differ only the way they already differed.
+
+   Special:GoToLinkedPage takes a dbname, not a language code, so the site is
+   built as `<code>wiki` rather than `<code>.wikipedia.org`: that is what keeps
+   an edition like zh_min_nan working if the top-32 vocabulary ever includes one.
+
+   The a and the span are listed together so every rule below applies to both. */
+.langs a { text-decoration:none; }
+.langs a:hover { background:var(--panel-2); color:var(--amber); }
+.langs a, .langs span { font-family:var(--font-data); font-size:9.5px; padding:1px 4px; border-radius:2px;
   background:var(--panel-3); color:var(--chalk-dim); }
 .langs span.miss { background:transparent; border:1px dashed var(--rule); color:var(--chalk-faint);
   text-decoration:line-through; }
@@ -386,6 +415,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
     <div class="group">
       <span class="lbl" id="lbl-themes">What kind</span>
       <div class="themes" role="group" aria-labelledby="lbl-themes" id="themes"></div>
+      <div class="catpin" id="catpin"></div>
     </div>
 
     <div class="group">
@@ -655,6 +685,7 @@ if (DATA.v !== 2) throw new Error('events payload is not the v2 packed format');
 const NEV = DATA.n;
 const CATS = DATA.categories.map(c => c.key);
 const CAT_THEME = DATA.categories.map(c => c.theme);
+const CAT_IX = {}; CATS.forEach((c, i) => { CAT_IX[c] = i; });
 
 /* Hot columns as typed arrays. drawEvents runs these every frame; the object
    array below is for everything that runs once per state change, where a plain
@@ -664,7 +695,8 @@ const EVT = new Float32Array(NEV);          // years before present
 const EVSL = new Uint16Array(NEV);
 const EVTH = new Uint8Array(NEV);           // theme index; the frame path must not
 const EVM = new Uint32Array(NEV);           // do a string lookup per marker, and
-const EV = new Array(NEV);                  // queryEvents must not read an object
+const EVC = new Uint8Array(NEV);            // queryEvents must not read an object
+const EV = new Array(NEV);                  // (62 categories; a byte is plenty)
 
 (() => {
   const C = DATA.cols;
@@ -684,6 +716,7 @@ const EV = new Array(NEV);                  // queryEvents must not read an obje
     EVSL[i] = dsl[i];
     EVTH[i] = THEME_IX[CAT_THEME[dc[i]]];
     EVM[i] = dm[i];
+    EVC[i] = dc[i];
     EV[i] = {
       i, q: 'Q' + dq[i], n: names[i], lat, lng, y: year,
       c: CATS[dc[i]], theme: CAT_THEME[dc[i]], sl: dsl[i], m: dm[i],
@@ -702,6 +735,7 @@ const S = {
   kt: 40,                           // coverage floor: opens legible, scrub down for the long tail
   themes: new Set(THEMES),
   lens: '',                         // '' | 'only:<lang>' | 'not:<lang>'
+  cat: '',                          // one of CATS, pinned as a fourth axis, or ''
   selection: null,
   /* The other events under the mark that was clicked, or null.
      Screen-space membership, so it is a snapshot of one click on one projection
@@ -719,9 +753,9 @@ const S = {
 
 /* ============================================================================
    THE QUERY
-   One function. Time window, coverage floor, theme filter and language lens are
-   not four features — they are one query with different axes pinned, exactly as
-   on the sibling site. Every renderer reads its output.
+   One function. Time window, coverage floor, theme filter, Wikidata category and
+   language lens are not five features — they are one query with different axes
+   pinned, exactly as on the sibling site. Every renderer reads its output.
    ========================================================================== */
 
 /* Returns the mask bit and which way the test runs, rather than a closure over
@@ -752,18 +786,27 @@ const QOUT = [];
 const THEME_ON = new Uint8Array(64);       // A.themes as bits, so the walk does
                                            // not hash a string per event
 
+/* Category counts, allocated once for the same reason everything else here is.
+   64 slots against 62 Wikidata classes in the corpus. */
+const CAT_COUNTS = new Uint32Array(64);
+
 function queryEvents(A) {
   const lens = lensTest(A);
   const lensBit = lens ? lens.bit : 0, lensWant = lens ? lens.want : false;
   const t0 = A.win.t0, t1 = A.win.t1, kt = A.kt;
   const nTh = THEMES.length;
   for (let t = 0; t < nTh; t++) THEME_ON[t] = A.themes.has(THEMES[t]) ? 1 : 0;
+  /* -1 is "no category pinned", so the test in the walk is one integer compare
+     rather than a string compare per event. An unrecognised key pins nothing
+     rather than emptying the globe; readHash validates against CATS as well. */
+  const catIx = A.cat && CAT_IX[A.cat] !== undefined ? CAT_IX[A.cat] : -1;
 
   const out = QOUT; out.length = 0;
   const idx = QIDX;
   let m = 0;
   const counts = new Uint32Array(nTh);
-  let inWindow = 0, belowCoverage = 0, lensDropped = 0;
+  CAT_COUNTS.fill(0);
+  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0;
 
   for (let i = 0; i < NEV; i++) {
     const t = EVT[i];
@@ -774,6 +817,13 @@ function queryEvents(A) {
     const th = EVTH[i];
     counts[th]++;
     if (!THEME_ON[th]) continue;
+    /* Counted AFTER the theme test and BEFORE the category test.
+       Before the theme test, a pinned category would go on reporting rows from
+       themes that are switched off. After the category test, every category
+       except the pinned one reports zero - which is the number that would make
+       the control useless the moment you used it. */
+    CAT_COUNTS[EVC[i]]++;
+    if (catIx >= 0 && EVC[i] !== catIx) { catDropped++; continue; }
     out.push(EV[i]);
     idx[m++] = i;
   }
@@ -781,7 +831,8 @@ function queryEvents(A) {
   const themeCounts = {};
   for (let t = 0; t < nTh; t++) themeCounts[THEMES[t]] = counts[t];
   return { events: out, idx: idx.subarray(0, m), n: m,
-           themeCounts, inWindow, belowCoverage, lensDropped, total: NEV };
+           themeCounts, catCounts: CAT_COUNTS, inWindow, belowCoverage,
+           lensDropped, catDropped, total: NEV };
 }
 
 let QCACHE = null;
@@ -2031,8 +2082,11 @@ function renderDetail() {
 
   elDetail.innerHTML = `
     <div class="dt-head">
-      <span class="tag" style="color:${esc(CSSV[e.theme])};border-color:${esc(withAlpha(CSSV[e.theme], .45))}">
-        ${esc(CAT_LABEL[e.c] || e.c)}</span>
+      <button class="tag" type="button" data-cat="${esc(e.c)}"
+        aria-pressed="${S.cat === e.c}"
+        title="Show only ${esc(CAT_LABEL[e.c] || e.c)} across the whole corpus"
+        style="color:${esc(CSSV[e.theme])};border-color:${esc(withAlpha(CSSV[e.theme], .45))}"
+        >${esc(CAT_LABEL[e.c] || e.c)}</button>
       <h2>${esc(e.n)}</h2>
       <div class="when num">${fmtYear(e.y)}</div>
       <div class="where num">${e.lat.toFixed(3)}°, ${e.lng.toFixed(3)}°</div>
@@ -2046,10 +2100,14 @@ function renderDetail() {
       <div class="langbar"><i style="width:${pct}%"></i></div>
       <div class="barnote num">${have.length} of the ${LANGS.length} most-carried editions</div>
       <div class="langs">
-        ${have.map(l => `<span>${esc(l)}</span>`).join('')}
+        ${have.map(l => `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${
+          encodeURIComponent(l)}wiki/${encodeURIComponent(e.q)}"
+          target="_blank" rel="noopener"
+          title="Read this on ${esc(l)}.wikipedia">${esc(l)}</a>`).join('')}
         ${missing.slice(0, 12).map(l => `<span class="miss">${esc(l)}</span>`).join('')}
       </div>
-      <p class="hint">Struck-through codes are major editions with no article on this.
+      <p class="hint">Codes that carry an article are links; struck-through ones are
+        major editions with no article on this.
         ${!(e.m & LANG_BIT.en) ? '<b style="color:var(--amber)">No English article.</b>' : ''}</p>
     </div>
 
@@ -2100,6 +2158,27 @@ function alsoHere(sel) {
         <span class="t">${esc(x.n)}</span>
         <span class="c num">${x.sl}</span></button>`).join('')}
     </div>`;
+}
+
+/* The pinned category, as one dismissible chip.
+   62 Wikidata classes ship in the corpus, are collapsed to 6 themes for colour,
+   and were surfaced per event as an inert caption. "Show me the other
+   cathedrals" was unaskable of 1,205 of them.
+
+   Only the pinned one is rendered. A roster of 62 rows above `.detail`, which is
+   `flex:1 1 auto`, squeezes the panel that actually answers the question down to
+   nothing - so the way in is the event you are already looking at, and this is
+   the way back out. */
+function renderCatPin() {
+  const el = document.getElementById('catpin');
+  if (!el) return;
+  if (!S.cat) { el.innerHTML = ''; return; }
+  const n = q().catCounts[CAT_IX[S.cat]] || 0;
+  el.innerHTML = `<button type="button" id="btn-unpin"
+      aria-label="Stop showing only ${esc(CAT_LABEL[S.cat] || S.cat)}">
+      <span>${esc(CAT_LABEL[S.cat] || S.cat)}</span>
+      <span class="n">${n.toLocaleString()}</span>
+      <span class="x" aria-hidden="true">&times;</span></button>`;
 }
 
 function renderThemes() {
@@ -2233,6 +2312,10 @@ function chooseEvent(i) {
   // globe - the one case this function exists to prevent.
   if (e.sl < S.kt) S.kt = e.sl;
   if (!S.themes.has(e.theme)) S.themes.add(e.theme);
+  // A pinned category is one more thing that can be in the way, and unlike the
+  // theme it cannot be widened to include the target - Cathedral and Battle are
+  // not both pinnable. So choosing something outside it unpins it.
+  if (S.cat && e.c !== S.cat) S.cat = '';
   if (S.lens) {
     const [mode, lang] = S.lens.split(':');
     const has = (e.m & LANG_BIT[lang]) !== 0;
@@ -2317,9 +2400,9 @@ document.addEventListener('click', e => {
    THE VIEW IN THE URL
 
    Where you are on the globe, how far back the window reaches, how much of the
-   world has to remember something before it appears, which themes are on and
-   which language lens is applied - all of it is a point in a small state space,
-   and until now none of it left the tab.
+   world has to remember something before it appears, which themes are on, which
+   Wikidata category is pinned and which language lens is applied - all of it is a
+   point in a small state space, and until now none of it left the tab.
 
    Two rules:
 
@@ -2347,6 +2430,7 @@ function encodeHash() {
   const off = THEMES.filter(t => !S.themes.has(t));
   if (off.length) p.push('th=' + off.join('.'));
   if (S.lens) p.push('l=' + S.lens);
+  if (S.cat) p.push('ct=' + S.cat);
   if (!S.cluster) p.push('cl=0');
   if (S.basemap !== 'satellite') p.push('b=' + S.basemap);
   if (S.showPlates) p.push('p=1');
@@ -2424,6 +2508,11 @@ function readHash() {
       const [mode, lang] = p.l.split(':');
       if ((mode === 'only' || mode === 'not') && own(LANG_BIT, lang)) S.lens = p.l;
     }
+    /* CATS.includes, not hasOwnProperty: CATS is an Array, so an own-property
+       test accepts "length" and every index in it - #ct=3 would have pinned
+       whatever category happened to be fourth, and #ct=length nothing at all
+       while the chip claimed otherwise. */
+    S.cat = CATS.includes(p.ct) ? p.ct : '';
     S.cluster = p.cl !== '0';
     S.basemap = p.b === 'chart' ? 'chart' : 'satellite';
     S.showPlates = p.p === '1';
@@ -2529,6 +2618,26 @@ function setSelection(qid, group) {
   S.selection = qid;
   S.group = group || null;
   changed(true);
+}
+
+/* Pin one Wikidata class as a fourth axis.
+ *
+ * What a pinned category does when its parent theme is off had to be decided
+ * rather than left to fall out: with `building` switched off, pinning
+ * "Cathedral" would empty the globe and the page would read as broken, with the
+ * cause two controls away. So pinning turns the parent theme back on - the same
+ * rule chooseEvent already uses for a search result, for the same reason.
+ * Nothing here is a second filtering path: the pin is an axis of the one query.
+ */
+function setCategory(key) {
+  const k = CATS.includes(key) ? key : '';
+  if (k === S.cat) return;
+  S.cat = k;
+  if (k) {
+    const th = CAT_THEME[CAT_IX[k]];
+    if (!S.themes.has(th)) S.themes.add(th);
+  }
+  changed();
 }
 
 /* -------------------------------------------------------------------- globe */
@@ -2938,7 +3047,12 @@ document.getElementById('themes').addEventListener('click', e => {
   changed();
 });
 document.getElementById('lens').addEventListener('change', e => { S.lens = e.target.value; changed(); });
+document.getElementById('catpin').addEventListener('click', e => {
+  if (e.target.closest('#btn-unpin')) setCategory('');
+});
 elDetail.addEventListener('click', e => {
+  const c = e.target.closest('[data-cat]');
+  if (c) { setCategory(S.cat === c.dataset.cat ? '' : c.dataset.cat); return; }
   const b = e.target.closest('[data-q]'); if (!b) return;
   /* A link in the "also at this mark" list is the one panel link that must not
      drop the list it came out of - every one of its targets is inside the same
@@ -3050,7 +3164,7 @@ function render(dt) {
   if (needRail) { drawRail(); needRail = false; }
   if (needPanel) {
     const F = q();
-    renderDetail(); renderThemes(); renderLens();
+    renderDetail(); renderThemes(); renderLens(); renderCatPin();
     document.getElementById('hdr-count').textContent = EV.length.toLocaleString();
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();
@@ -3060,7 +3174,7 @@ function render(dt) {
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
     const dropped = F.inWindow - F.events.length;
     document.getElementById('rd-drop').innerHTML = dropped > 0
-      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme or lens`
+      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme${S.cat ? ', category' : ''} or lens`
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`

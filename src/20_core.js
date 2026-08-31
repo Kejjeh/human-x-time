@@ -202,6 +202,7 @@ if (DATA.v !== 2) throw new Error('events payload is not the v2 packed format');
 const NEV = DATA.n;
 const CATS = DATA.categories.map(c => c.key);
 const CAT_THEME = DATA.categories.map(c => c.theme);
+const CAT_IX = {}; CATS.forEach((c, i) => { CAT_IX[c] = i; });
 
 /* Hot columns as typed arrays. drawEvents runs these every frame; the object
    array below is for everything that runs once per state change, where a plain
@@ -211,7 +212,8 @@ const EVT = new Float32Array(NEV);          // years before present
 const EVSL = new Uint16Array(NEV);
 const EVTH = new Uint8Array(NEV);           // theme index; the frame path must not
 const EVM = new Uint32Array(NEV);           // do a string lookup per marker, and
-const EV = new Array(NEV);                  // queryEvents must not read an object
+const EVC = new Uint8Array(NEV);            // queryEvents must not read an object
+const EV = new Array(NEV);                  // (62 categories; a byte is plenty)
 
 (() => {
   const C = DATA.cols;
@@ -231,6 +233,7 @@ const EV = new Array(NEV);                  // queryEvents must not read an obje
     EVSL[i] = dsl[i];
     EVTH[i] = THEME_IX[CAT_THEME[dc[i]]];
     EVM[i] = dm[i];
+    EVC[i] = dc[i];
     EV[i] = {
       i, q: 'Q' + dq[i], n: names[i], lat, lng, y: year,
       c: CATS[dc[i]], theme: CAT_THEME[dc[i]], sl: dsl[i], m: dm[i],
@@ -249,6 +252,7 @@ const S = {
   kt: 40,                           // coverage floor: opens legible, scrub down for the long tail
   themes: new Set(THEMES),
   lens: '',                         // '' | 'only:<lang>' | 'not:<lang>'
+  cat: '',                          // one of CATS, pinned as a fourth axis, or ''
   selection: null,
   /* The other events under the mark that was clicked, or null.
      Screen-space membership, so it is a snapshot of one click on one projection

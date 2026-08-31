@@ -78,8 +78,11 @@ function renderDetail() {
 
   elDetail.innerHTML = `
     <div class="dt-head">
-      <span class="tag" style="color:${esc(CSSV[e.theme])};border-color:${esc(withAlpha(CSSV[e.theme], .45))}">
-        ${esc(CAT_LABEL[e.c] || e.c)}</span>
+      <button class="tag" type="button" data-cat="${esc(e.c)}"
+        aria-pressed="${S.cat === e.c}"
+        title="Show only ${esc(CAT_LABEL[e.c] || e.c)} across the whole corpus"
+        style="color:${esc(CSSV[e.theme])};border-color:${esc(withAlpha(CSSV[e.theme], .45))}"
+        >${esc(CAT_LABEL[e.c] || e.c)}</button>
       <h2>${esc(e.n)}</h2>
       <div class="when num">${fmtYear(e.y)}</div>
       <div class="where num">${e.lat.toFixed(3)}°, ${e.lng.toFixed(3)}°</div>
@@ -93,10 +96,14 @@ function renderDetail() {
       <div class="langbar"><i style="width:${pct}%"></i></div>
       <div class="barnote num">${have.length} of the ${LANGS.length} most-carried editions</div>
       <div class="langs">
-        ${have.map(l => `<span>${esc(l)}</span>`).join('')}
+        ${have.map(l => `<a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${
+          encodeURIComponent(l)}wiki/${encodeURIComponent(e.q)}"
+          target="_blank" rel="noopener"
+          title="Read this on ${esc(l)}.wikipedia">${esc(l)}</a>`).join('')}
         ${missing.slice(0, 12).map(l => `<span class="miss">${esc(l)}</span>`).join('')}
       </div>
-      <p class="hint">Struck-through codes are major editions with no article on this.
+      <p class="hint">Codes that carry an article are links; struck-through ones are
+        major editions with no article on this.
         ${!(e.m & LANG_BIT.en) ? '<b style="color:var(--amber)">No English article.</b>' : ''}</p>
     </div>
 
@@ -147,6 +154,27 @@ function alsoHere(sel) {
         <span class="t">${esc(x.n)}</span>
         <span class="c num">${x.sl}</span></button>`).join('')}
     </div>`;
+}
+
+/* The pinned category, as one dismissible chip.
+   62 Wikidata classes ship in the corpus, are collapsed to 6 themes for colour,
+   and were surfaced per event as an inert caption. "Show me the other
+   cathedrals" was unaskable of 1,205 of them.
+
+   Only the pinned one is rendered. A roster of 62 rows above `.detail`, which is
+   `flex:1 1 auto`, squeezes the panel that actually answers the question down to
+   nothing - so the way in is the event you are already looking at, and this is
+   the way back out. */
+function renderCatPin() {
+  const el = document.getElementById('catpin');
+  if (!el) return;
+  if (!S.cat) { el.innerHTML = ''; return; }
+  const n = q().catCounts[CAT_IX[S.cat]] || 0;
+  el.innerHTML = `<button type="button" id="btn-unpin"
+      aria-label="Stop showing only ${esc(CAT_LABEL[S.cat] || S.cat)}">
+      <span>${esc(CAT_LABEL[S.cat] || S.cat)}</span>
+      <span class="n">${n.toLocaleString()}</span>
+      <span class="x" aria-hidden="true">&times;</span></button>`;
 }
 
 function renderThemes() {
