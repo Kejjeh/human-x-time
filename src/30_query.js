@@ -1,8 +1,8 @@
 /* ============================================================================
    THE QUERY
-   One function. Time window, coverage floor, theme filter and language lens are
-   not four features — they are one query with different axes pinned, exactly as
-   on the sibling site. Every renderer reads its output.
+   One function. Time window, coverage floor, theme filter, Wikidata category and
+   language lens are not five features — they are one query with different axes
+   pinned, exactly as on the sibling site. Every renderer reads its output.
    ========================================================================== */
 
 /* Returns the mask bit and which way the test runs, rather than a closure over
@@ -33,18 +33,27 @@ const QOUT = [];
 const THEME_ON = new Uint8Array(64);       // A.themes as bits, so the walk does
                                            // not hash a string per event
 
+/* Category counts, allocated once for the same reason everything else here is.
+   64 slots against 62 Wikidata classes in the corpus. */
+const CAT_COUNTS = new Uint32Array(64);
+
 function queryEvents(A) {
   const lens = lensTest(A);
   const lensBit = lens ? lens.bit : 0, lensWant = lens ? lens.want : false;
   const t0 = A.win.t0, t1 = A.win.t1, kt = A.kt;
   const nTh = THEMES.length;
   for (let t = 0; t < nTh; t++) THEME_ON[t] = A.themes.has(THEMES[t]) ? 1 : 0;
+  /* -1 is "no category pinned", so the test in the walk is one integer compare
+     rather than a string compare per event. An unrecognised key pins nothing
+     rather than emptying the globe; readHash validates against CATS as well. */
+  const catIx = A.cat && CAT_IX[A.cat] !== undefined ? CAT_IX[A.cat] : -1;
 
   const out = QOUT; out.length = 0;
   const idx = QIDX;
   let m = 0;
   const counts = new Uint32Array(nTh);
-  let inWindow = 0, belowCoverage = 0, lensDropped = 0;
+  CAT_COUNTS.fill(0);
+  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0;
 
   for (let i = 0; i < NEV; i++) {
     const t = EVT[i];
@@ -55,6 +64,13 @@ function queryEvents(A) {
     const th = EVTH[i];
     counts[th]++;
     if (!THEME_ON[th]) continue;
+    /* Counted AFTER the theme test and BEFORE the category test.
+       Before the theme test, a pinned category would go on reporting rows from
+       themes that are switched off. After the category test, every category
+       except the pinned one reports zero - which is the number that would make
+       the control useless the moment you used it. */
+    CAT_COUNTS[EVC[i]]++;
+    if (catIx >= 0 && EVC[i] !== catIx) { catDropped++; continue; }
     out.push(EV[i]);
     idx[m++] = i;
   }
@@ -62,7 +78,8 @@ function queryEvents(A) {
   const themeCounts = {};
   for (let t = 0; t < nTh; t++) themeCounts[THEMES[t]] = counts[t];
   return { events: out, idx: idx.subarray(0, m), n: m,
-           themeCounts, inWindow, belowCoverage, lensDropped, total: NEV };
+           themeCounts, catCounts: CAT_COUNTS, inWindow, belowCoverage,
+           lensDropped, catDropped, total: NEV };
 }
 
 let QCACHE = null;

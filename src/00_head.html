@@ -211,9 +211,26 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .empty li { margin-bottom:4px; }
 
 .dt-head { padding:14px 16px 12px; border-bottom:1px solid var(--rule); }
+/* The pinned-category chip. One row, only ever present when a category is
+   actually pinned - 62 rows of anything above `.detail { flex:1 1 auto }` would
+   squeeze the panel to nothing, which is why the roster is not rendered here. */
+.catpin:empty { display:none; }
+.catpin { margin-top:8px; }
+.catpin button { display:inline-flex; align-items:center; gap:7px; max-width:100%;
+  font-family:var(--font-display); text-transform:uppercase; letter-spacing:.1em;
+  font-size:9.5px; padding:4px 8px; border-radius:3px; cursor:pointer;
+  background:var(--panel-3); color:var(--amber); border:1px solid var(--amber-d); }
+.catpin button:hover { background:var(--panel-2); }
+.catpin button .n { font-family:var(--font-data); letter-spacing:0; color:var(--chalk-dim); }
+.catpin button .x { font-size:12px; line-height:1; color:var(--chalk-dim); }
 .dt-head .tag { font-family:var(--font-display); text-transform:uppercase; letter-spacing:.12em;
   font-size:9.5px; padding:2px 6px; border:1px solid var(--rule); border-radius:var(--r);
   color:var(--chalk-faint); }
+/* The category on a selected event is a control, not a caption: it pins that
+   Wikidata class as an axis. It has to look pressable without becoming a second
+   accent - the palette keeps amber for coverage. */
+.dt-head button.tag { cursor:pointer; background:transparent; }
+.dt-head button.tag:hover { background:var(--panel-3); }
 .dt-head h2 { margin:8px 0 0; font-size:18px; font-weight:600; font-family:var(--font-display);
   line-height:1.2; text-wrap:balance; }
 .dt-head .when { margin:6px 0 0; font-family:var(--font-data); font-size:15px; color:var(--amber);
@@ -226,7 +243,19 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .langbar i { display:block; height:100%; background:var(--amber); }
 .barnote { font-size:9.5px; color:var(--chalk-faint); margin:-4px 0 8px; letter-spacing:0; }
 .langs { display:flex; flex-wrap:wrap; gap:3px; }
-.langs span { font-family:var(--font-data); font-size:9.5px; padding:1px 4px; border-radius:2px;
+/* A code that carries an article is a link; one that does not is a span. That
+   difference is the coverage argument made tactile in the one place a reader is
+   already looking at it, so the two have to stay visually one row - same size,
+   same padding, no underline - and differ only the way they already differed.
+
+   Special:GoToLinkedPage takes a dbname, not a language code, so the site is
+   built as `<code>wiki` rather than `<code>.wikipedia.org`: that is what keeps
+   an edition like zh_min_nan working if the top-32 vocabulary ever includes one.
+
+   The a and the span are listed together so every rule below applies to both. */
+.langs a { text-decoration:none; }
+.langs a:hover { background:var(--panel-2); color:var(--amber); }
+.langs a, .langs span { font-family:var(--font-data); font-size:9.5px; padding:1px 4px; border-radius:2px;
   background:var(--panel-3); color:var(--chalk-dim); }
 .langs span.miss { background:transparent; border:1px dashed var(--rule); color:var(--chalk-faint);
   text-decoration:line-through; }

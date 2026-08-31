@@ -66,6 +66,26 @@ function setSelection(qid, group) {
   changed(true);
 }
 
+/* Pin one Wikidata class as a fourth axis.
+ *
+ * What a pinned category does when its parent theme is off had to be decided
+ * rather than left to fall out: with `building` switched off, pinning
+ * "Cathedral" would empty the globe and the page would read as broken, with the
+ * cause two controls away. So pinning turns the parent theme back on - the same
+ * rule chooseEvent already uses for a search result, for the same reason.
+ * Nothing here is a second filtering path: the pin is an axis of the one query.
+ */
+function setCategory(key) {
+  const k = CATS.includes(key) ? key : '';
+  if (k === S.cat) return;
+  S.cat = k;
+  if (k) {
+    const th = CAT_THEME[CAT_IX[k]];
+    if (!S.themes.has(th)) S.themes.add(th);
+  }
+  changed();
+}
+
 /* -------------------------------------------------------------------- globe */
 let gDrag = null, gMoved = 0;
 const gVel = [];
@@ -473,7 +493,12 @@ document.getElementById('themes').addEventListener('click', e => {
   changed();
 });
 document.getElementById('lens').addEventListener('change', e => { S.lens = e.target.value; changed(); });
+document.getElementById('catpin').addEventListener('click', e => {
+  if (e.target.closest('#btn-unpin')) setCategory('');
+});
 elDetail.addEventListener('click', e => {
+  const c = e.target.closest('[data-cat]');
+  if (c) { setCategory(S.cat === c.dataset.cat ? '' : c.dataset.cat); return; }
   const b = e.target.closest('[data-q]'); if (!b) return;
   /* A link in the "also at this mark" list is the one panel link that must not
      drop the list it came out of - every one of its targets is inside the same
@@ -585,7 +610,7 @@ function render(dt) {
   if (needRail) { drawRail(); needRail = false; }
   if (needPanel) {
     const F = q();
-    renderDetail(); renderThemes(); renderLens();
+    renderDetail(); renderThemes(); renderLens(); renderCatPin();
     document.getElementById('hdr-count').textContent = EV.length.toLocaleString();
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();
@@ -595,7 +620,7 @@ function render(dt) {
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
     const dropped = F.inWindow - F.events.length;
     document.getElementById('rd-drop').innerHTML = dropped > 0
-      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme or lens`
+      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme${S.cat ? ', category' : ''} or lens`
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`

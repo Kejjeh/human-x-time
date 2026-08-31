@@ -2,9 +2,9 @@
    THE VIEW IN THE URL
 
    Where you are on the globe, how far back the window reaches, how much of the
-   world has to remember something before it appears, which themes are on and
-   which language lens is applied - all of it is a point in a small state space,
-   and until now none of it left the tab.
+   world has to remember something before it appears, which themes are on, which
+   Wikidata category is pinned and which language lens is applied - all of it is a
+   point in a small state space, and until now none of it left the tab.
 
    Two rules:
 
@@ -32,6 +32,7 @@ function encodeHash() {
   const off = THEMES.filter(t => !S.themes.has(t));
   if (off.length) p.push('th=' + off.join('.'));
   if (S.lens) p.push('l=' + S.lens);
+  if (S.cat) p.push('ct=' + S.cat);
   if (!S.cluster) p.push('cl=0');
   if (S.basemap !== 'satellite') p.push('b=' + S.basemap);
   if (S.showPlates) p.push('p=1');
@@ -109,6 +110,11 @@ function readHash() {
       const [mode, lang] = p.l.split(':');
       if ((mode === 'only' || mode === 'not') && own(LANG_BIT, lang)) S.lens = p.l;
     }
+    /* CATS.includes, not hasOwnProperty: CATS is an Array, so an own-property
+       test accepts "length" and every index in it - #ct=3 would have pinned
+       whatever category happened to be fourth, and #ct=length nothing at all
+       while the chip claimed otherwise. */
+    S.cat = CATS.includes(p.ct) ? p.ct : '';
     S.cluster = p.cl !== '0';
     S.basemap = p.b === 'chart' ? 'chart' : 'satellite';
     S.showPlates = p.p === '1';

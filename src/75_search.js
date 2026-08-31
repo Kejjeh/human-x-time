@@ -106,6 +106,10 @@ function chooseEvent(i) {
   // globe - the one case this function exists to prevent.
   if (e.sl < S.kt) S.kt = e.sl;
   if (!S.themes.has(e.theme)) S.themes.add(e.theme);
+  // A pinned category is one more thing that can be in the way, and unlike the
+  // theme it cannot be widened to include the target - Cathedral and Battle are
+  // not both pinnable. So choosing something outside it unpins it.
+  if (S.cat && e.c !== S.cat) S.cat = '';
   if (S.lens) {
     const [mode, lang] = S.lens.split(':');
     const has = (e.m & LANG_BIT[lang]) !== 0;
