@@ -100,6 +100,19 @@ def main():
                  f"language mask; they would read as carried by no edition at all. "
                  f"Run tools/fetch_languages.py, then build again.")
 
+    # `sl` is the total across all ~348 editions; `m` is a bit per edition in the
+    # top 32. So the total can never be smaller than the number of bits set, and
+    # an event where it is has had one of the two written by a different run than
+    # the other - which is exactly the shape a half-finished coverage refresh
+    # leaves behind, and it is invisible on screen: the bar and the codes agree
+    # with each other and only the headline number is wrong.
+    incoherent = [e["q"] for e in source["events"]
+                  if e.get("sl", 0) < bin(e.get("m", 0)).count("1")]
+    if incoherent:
+        sys.exit(f"FATAL: {len(incoherent):,} events carry fewer total editions than "
+                 f"the mask records (e.g. {incoherent[0]}); `sl` and `m` are from "
+                 f"different runs. Re-run tools/fetch_languages.py.")
+
     # The encoding alphabet excludes quote, backslash and angle brackets, so the
     # payloads drop into a JS string literal untouched. Assert it rather than hope.
     for name, blob in (("land", land), ("plates", plates)):

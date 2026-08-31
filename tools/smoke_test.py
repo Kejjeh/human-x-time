@@ -1673,6 +1673,31 @@ def run(url, headed, report):
                      f"selection={page.evaluate('S.selection')!r} lens={page.evaluate('S.lens')!r}")
         report.check("a hostile hash raises no errors", not page_errors, " | ".join(page_errors[:2]))
 
+        # The coverage refresh recomputes the top-32 vocabulary from frequency,
+        # so a shared #l=only:xx link is only durable if the lens resolves the
+        # CODE rather than a bit position. It does - LANG_BIT is keyed by name -
+        # but the refresh that moved `ja` from index 13 to 12 is exactly when
+        # you want that checked rather than assumed.
+        page.goto("about:blank")
+        page.goto(url.split("#")[0] + "#c=1&t=0_75000&l=only:ja",
+                  wait_until="load", timeout=60000)
+        page.wait_for_timeout(1200)
+        lens = page.evaluate("""() => {
+          const at = LANGS.indexOf('ja');
+          const bit = 1 << at;
+          const F = q();
+          let wrong = 0;
+          for (const e of F.events) if (!(e.m & bit)) wrong++;
+          return { lens: S.lens, at, n: F.n, wrong,
+                   ctl: document.getElementById('lens').value,
+                   byName: LANG_BIT.ja === bit };
+        }""")
+        report.check("a shared language lens resolves by edition code, not bit position",
+                     lens["lens"] == "only:ja" and lens["byName"] and lens["wrong"] == 0
+                     and lens["n"] > 0 and lens["ctl"] == "only:ja",
+                     f"ja is bit {lens['at']} today; {lens['n']:,} events shown, "
+                     f"{lens['wrong']} of them without it")
+
         browser.close()
 
 

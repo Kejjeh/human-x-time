@@ -41,7 +41,7 @@ every edition covers — in the notability-ranked head, 99.5% of events have an
 English article, which flattens the axis to nothing. The asymmetry lives in the
 tail. So the ingest asks each sitelink band for its own quota rather than ranking
 a whole class by notability — which also dodges the 60-second query timeout, since
-no single query is large enough to hit it. **7,387 events in the corpus have no
+no single query is large enough to hit it. **7,016 events in the corpus have no
 English article**, against 241 in the first cut.
 
 ## Try these
@@ -52,8 +52,8 @@ query as it goes. Or do it by hand:
 
 | | |
 |---|---|
-| Drag the right-hand rail past the bottom | 2,183 events become 38,242 — all of them, including four no Wikipedia edition anywhere carries. Europe fills in first and hardest. |
-| Set the lens to **Missing from en.wikipedia** | 7,387 events the anglophone record does not carry. |
+| Drag the right-hand rail past the bottom | 2,192 events become 38,048 — everything inside the default window, including four that no Wikipedia edition anywhere carries. Europe fills in first and hardest. |
+| Set the lens to **Missing from en.wikipedia** | 6,989 of those the anglophone record does not carry; 7,016 across the whole corpus. |
 | Watch the histogram | The record thickens toward the present — that is survivorship, not history. |
 | Compare Europe with Central Asia at any coverage floor | The unevenness is the point. |
 
@@ -79,7 +79,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 120 checks, run against both built documents and wired into the build as a gate. The sibling
+outside, whether it works — 121 checks, run against both built documents and wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
