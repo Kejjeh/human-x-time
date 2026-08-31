@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 104 checks, run against both built documents and wired into the build as a gate. The sibling
+outside, whether it works — 111 checks, run against both built documents and wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
@@ -161,8 +161,11 @@ live query.
   scrolls the page instead of flinging the globe to the pole, a tap answers with
   the tooltip and brings the panel into view, and the cluster cell follows the
   pointer — 89% of marks were ambiguous under a finger at 390px, now 54%. The
-  stage overlays clear AA in light mode. The keyboard reaches the time axis and
-  both sliders announce their value in words. A cluster names what is inside it,
+  stage overlays clear AA in light mode. The keyboard reaches the time axis, both
+  sliders announce their value in words, and it reaches the globe itself: Enter
+  selects the mark nearest the middle of the disc and shift with an arrow key
+  steps to the next mark in that direction, so a spatial selection no longer
+  needs a mouse. A cluster names what is inside it,
   in the same count the tooltip printed. The 62 Wikidata categories are a real
   axis, so "show me the other 1,204 cathedrals" is one click on the tag. A click
   inside the panel opens whatever is hiding its target and flies there, instead

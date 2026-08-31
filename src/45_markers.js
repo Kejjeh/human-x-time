@@ -164,6 +164,66 @@ function hitTest(mx, my) {
   return null;
 }
 
+/* One hit target, in the shape hitTest returns - so the keyboard and the mouse
+   hand the same thing to setSelection and neither has to know how the other got
+   there. */
+function targetAt(k) {
+  if (k < 0 || k >= HN) return null;
+  return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k], g: HK[k] };
+}
+
+/* The keyboard's route onto the globe.
+ *
+ * The canvas is role="application" tabindex="0" and advertises "arrow keys
+ * rotate, plus and minus zoom, Escape clears the selection". Every one of those
+ * worked; between them they let a keyboard user look at the globe and clear a
+ * selection, and gave no way to MAKE one - the primary action of the site.
+ * Search reaches any mark BY NAME, which is not the same as reaching the mark
+ * you can see, there, on the coast.
+ *
+ * Directional, not a cycle: at the default view there are 2,183 marks, and
+ * stepping through them in draw order is not a route to anything. The cone test
+ * is the standard one - a candidate has to be more in the direction asked for
+ * than across it - and the cost is a perpendicular offset weighted against the
+ * distance, so "up" prefers the mark straight above to one further along the
+ * axis but well off to the side. */
+function nextInDirection(x, y, dx, dy, skip) {
+  let best = -1, bestCost = Infinity;
+  for (let k = 0; k < HN; k++) {
+    if (k === skip) continue;
+    const ax = HX[k] - x, ay = HY[k] - y;
+    const along = ax * dx + ay * dy;
+    if (along <= 1) continue;                       // behind, or on the spot
+    const across = Math.abs(ax * dy - ay * dx);
+    if (across > along) continue;                   // outside a 45-degree cone
+    const cost = along + across * 2;
+    if (cost < bestCost) { bestCost = cost; best = k; }
+  }
+  return best;
+}
+
+/* The mark nearest the middle of the disc - the keyboard's way in, before there
+   is a selection to move from. */
+function nearestToCentre() {
+  let best = -1, bd = Infinity;
+  for (let k = 0; k < HN; k++) {
+    const dx = HX[k] - GCX, dy = HY[k] - GCY;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+
+/* Where a directional step starts from: the selected mark if it is on screen,
+   otherwise the centre of the disc. */
+function targetOfSelection() {
+  if (!S.selection) return -1;
+  const e = BY_Q[S.selection];
+  if (!e) return -1;
+  for (let k = 0; k < HN; k++) if (HI[k] === e.i) return k;
+  return -1;
+}
+
 function drawEvents() {
   const F = q();
   const src = F.idx, N = F.n;

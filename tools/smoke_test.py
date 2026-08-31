@@ -422,6 +422,91 @@ def run(url, headed, report):
             report.check("a click inside the panel flies the globe to it",
                          goto["flying"],
                          "camera tween started" if goto["flying"] else "no camera tween was started")
+
+        # The globe is role="application" tabindex="0" and advertised arrows,
+        # plus/minus and Escape. All of those worked; between them they let a
+        # keyboard user look at the globe and clear a selection, and gave no way
+        # to MAKE one - the primary action of the site. Search reaches any mark
+        # by NAME, which is not the same as reaching the one you can see.
+        # TW and the spin have to go too: a camera tween left running by an
+        # earlier check keeps rewriting S.rot after the keypress, so "the mark
+        # nearest the centre" is measured against a globe that has moved on.
+        page.evaluate("""() => { S.kt = 40; S.themes = new Set(THEMES); S.lens = '';
+          S.win = { t0: 0, t1: 3200 }; S.rot.lam = -10; S.rot.phi = 25;
+          S.cat = ''; TW = null; S.spin.lam = 0; S.spin.phi = 0;
+          setSelection(null); changed(); renderNow(); }""")
+        page.wait_for_timeout(300)
+        page.focus("#globe")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(250)
+        entry = page.evaluate("""() => ({
+          sel: S.selection,
+          tip: document.getElementById('tip').classList.contains('on'),
+          group: !!S.group,
+          /* the mark it landed on has to be the one nearest the middle of the
+             disc, not merely some mark */
+          nearest: (() => {
+            const e = BY_Q[S.selection]; if (!e) return false;
+            let best = -1, bd = Infinity;
+            for (let k = 0; k < HN; k++) {
+              const dx = HX[k] - GCX, dy = HY[k] - GCY, d = dx * dx + dy * dy;
+              if (d < bd) { bd = d; best = k; }
+            }
+            return best >= 0 && HI[best] === e.i;
+          })() })""")
+        report.check("Enter makes a selection from the keyboard",
+                     entry["sel"] is not None and entry["nearest"],
+                     f"landed on {entry['sel']!r}, nearest to the centre={entry['nearest']}")
+        report.check("a keyboard selection answers with the tooltip, like a tap",
+                     entry["tip"], f"tip shown={entry['tip']}")
+
+        walk = []
+        for key in ("ArrowRight", "ArrowRight", "ArrowUp", "ArrowLeft", "ArrowDown"):
+            page.keyboard.press("Shift+" + key)
+            page.wait_for_timeout(160)
+            walk.append(page.evaluate("""() => {
+              const e = BY_Q[S.selection];
+              for (let k = 0; k < HN; k++) if (HI[k] === e.i)
+                return { q: e.q, x: Math.round(HX[k]), y: Math.round(HY[k]) };
+              return { q: e.q, x: null, y: null };
+            }"""))
+        report.check("shift with an arrow moves to another mark",
+                     len({w["q"] for w in walk}) >= 4,
+                     " -> ".join(w["q"] for w in walk))
+        # each step has to go the way it was asked: the cone test is what makes
+        # this navigation rather than a cycle in draw order
+        dirs = [(1, 0), (1, 0), (0, -1), (-1, 0), (0, 1)]
+        prev = page.evaluate("""() => { const e = BY_Q[%r];
+          for (let k = 0; k < HN; k++) if (HI[k] === e.i)
+            return { x: Math.round(HX[k]), y: Math.round(HY[k]) };
+          return null; }""" % entry["sel"])
+        wrong = []
+        if prev and all(w["x"] is not None for w in walk):
+            pts = [prev] + walk
+            for i, (dx, dy) in enumerate(dirs):
+                ax, ay = pts[i + 1]["x"] - pts[i]["x"], pts[i + 1]["y"] - pts[i]["y"]
+                along, across = ax * dx + ay * dy, abs(ax * dy - ay * dx)
+                if along <= 0 or across > along:
+                    wrong.append(f"step {i + 1}: {ax:+d},{ay:+d}")
+        report.check("every keyboard step goes the way it was asked",
+                     not wrong, "; ".join(wrong) or "five steps, all inside their cone")
+
+        lam0 = page.evaluate("S.rot.lam")
+        page.keyboard.press("ArrowRight")
+        page.wait_for_timeout(150)
+        report.check("an unmodified arrow still turns the globe",
+                     abs(page.evaluate("S.rot.lam") - lam0) > 1,
+                     f"longitude {lam0:.1f} -> {page.evaluate('S.rot.lam'):.1f}")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+        report.check("Escape clears the selection and the tooltip with it",
+                     page.evaluate("S.selection") is None and
+                     not page.evaluate("document.getElementById('tip').classList.contains('on')"),
+                     f"selection={page.evaluate('S.selection')!r}")
+        report.check("the canvas label says how to make a selection",
+                     "Enter" in page.evaluate("gcv.getAttribute('aria-label')") and
+                     "shift" in page.evaluate("gcv.getAttribute('aria-label')").lower(),
+                     page.evaluate("gcv.getAttribute('aria-label')")[:110])
         page.evaluate("""() => { S.kt = 40; S.themes = new Set(THEMES);
           S.win = { t0: 0, t1: 3200 }; TW = null; setSelection(null); renderNow(); }""")
         page.wait_for_timeout(120)
