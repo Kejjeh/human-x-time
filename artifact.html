@@ -392,6 +392,14 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
     scrollbar-width:none; }
   .stage-tr::-webkit-scrollbar { display:none; }
   .stage-tr .iconbtn { white-space:nowrap; flex:none; }
+  /* The guided path is meant to be read WHILE the controls move under it. On a
+     390px phone the stage is about 370px tall and six lines of 12px prose plus
+     a button row took 45% of it, so the thing being demonstrated was behind the
+     description of it. Smaller, capped, and scrolling inside itself. */
+  .tour { left:8px; right:8px; bottom:8px; padding:8px 10px; gap:8px;
+    max-height:42%; overflow-y:auto; }
+  .tour-t { font-size:11px; line-height:1.45; flex-basis:100%; }
+  .tour-b { margin-left:auto; }
 }
 /* A finger's first instinct on a narrow layout is to swipe up and read on. All
    three canvases took touch-action:none, so that swipe never reached the page:
@@ -859,15 +867,22 @@ function queryEvents(A) {
     if (EVSL[i] < kt) { belowCoverage++; continue; }
     if (lensBit && ((EVM[i] & lensBit) !== 0) !== lensWant) { lensDropped++; continue; }
     const th = EVTH[i];
-    counts[th]++;
+    /* Each tally counts everything EXCEPT its own axis. That is the whole rule,
+       and both halves of it have a wrong answer sitting right next to them.
+
+       A theme count is what clicking that chip would give you, so it has to
+       respect a pinned category: with Capitals pinned the chips read 262
+       Conflict and 266 Politics beside a globe showing 227 of anything, and
+       clicking Politics did not produce 266 of them.
+
+       A category count has to respect the themes, for the same reason - but it
+       cannot sit below the category test, or every category except the pinned
+       one reports zero and the control can never be moved to a different one. */
+    const catOK = catIx < 0 || EVC[i] === catIx;
+    if (catOK) counts[th]++;
     if (!THEME_ON[th]) continue;
-    /* Counted AFTER the theme test and BEFORE the category test.
-       Before the theme test, a pinned category would go on reporting rows from
-       themes that are switched off. After the category test, every category
-       except the pinned one reports zero - which is the number that would make
-       the control useless the moment you used it. */
     CAT_COUNTS[EVC[i]]++;
-    if (catIx >= 0 && EVC[i] !== catIx) { catDropped++; continue; }
+    if (!catOK) { catDropped++; continue; }
     out.push(EV[i]);
     idx[m++] = i;
   }
@@ -2217,7 +2232,12 @@ function renderDetail() {
     // Ranked, not sliced raw: the corpus arrives in year order now, so an
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
-    const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
+    /* ...and only when it says something the list above does not. Under the
+       lens "Missing from en.wikipedia" every visible event is already one with
+       no English article, so this rendered the same six names twice under two
+       different headings, which reads as a fault rather than as a finding. */
+    const thin = S.lens === 'not:en' ? []
+      : topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
     writeDetail(`
       <div class="empty">
         <strong>Nothing selected</strong>

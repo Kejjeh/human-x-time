@@ -409,6 +409,14 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
     scrollbar-width:none; }
   .stage-tr::-webkit-scrollbar { display:none; }
   .stage-tr .iconbtn { white-space:nowrap; flex:none; }
+  /* The guided path is meant to be read WHILE the controls move under it. On a
+     390px phone the stage is about 370px tall and six lines of 12px prose plus
+     a button row took 45% of it, so the thing being demonstrated was behind the
+     description of it. Smaller, capped, and scrolling inside itself. */
+  .tour { left:8px; right:8px; bottom:8px; padding:8px 10px; gap:8px;
+    max-height:42%; overflow-y:auto; }
+  .tour-t { font-size:11px; line-height:1.45; flex-basis:100%; }
+  .tour-b { margin-left:auto; }
 }
 /* A finger's first instinct on a narrow layout is to swipe up and read on. All
    three canvases took touch-action:none, so that swipe never reached the page:

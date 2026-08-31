@@ -62,15 +62,22 @@ function queryEvents(A) {
     if (EVSL[i] < kt) { belowCoverage++; continue; }
     if (lensBit && ((EVM[i] & lensBit) !== 0) !== lensWant) { lensDropped++; continue; }
     const th = EVTH[i];
-    counts[th]++;
+    /* Each tally counts everything EXCEPT its own axis. That is the whole rule,
+       and both halves of it have a wrong answer sitting right next to them.
+
+       A theme count is what clicking that chip would give you, so it has to
+       respect a pinned category: with Capitals pinned the chips read 262
+       Conflict and 266 Politics beside a globe showing 227 of anything, and
+       clicking Politics did not produce 266 of them.
+
+       A category count has to respect the themes, for the same reason - but it
+       cannot sit below the category test, or every category except the pinned
+       one reports zero and the control can never be moved to a different one. */
+    const catOK = catIx < 0 || EVC[i] === catIx;
+    if (catOK) counts[th]++;
     if (!THEME_ON[th]) continue;
-    /* Counted AFTER the theme test and BEFORE the category test.
-       Before the theme test, a pinned category would go on reporting rows from
-       themes that are switched off. After the category test, every category
-       except the pinned one reports zero - which is the number that would make
-       the control useless the moment you used it. */
     CAT_COUNTS[EVC[i]]++;
-    if (catIx >= 0 && EVC[i] !== catIx) { catDropped++; continue; }
+    if (!catOK) { catDropped++; continue; }
     out.push(EV[i]);
     idx[m++] = i;
   }
