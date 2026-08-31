@@ -201,6 +201,11 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .search-note { margin:6px 0 0; font-size:10.5px; color:var(--chalk-faint); }
 
 /* ================================================================= DETAIL */
+/* Off-screen but still announced. Not display:none and not visibility:hidden -
+   both take the node out of the accessibility tree, and a live region that is
+   not in the tree announces nothing at all. */
+.sr { position:absolute; width:1px; height:1px; margin:-1px; padding:0; border:0;
+  overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }
 .detail { flex:1 1 auto; overflow-y:auto; min-height:0; scrollbar-width:thin; }
 .detail::-webkit-scrollbar { width:8px; }
 .detail::-webkit-scrollbar-thumb { background:var(--panel-3); border-radius:4px; }

@@ -191,7 +191,18 @@ function drawEvents() {
 
   PM = m;
   if (S.cluster) {
-    CELL = Math.max(15, GR * 0.055);
+    /* The cell floor is what decides how many separate things a tap can land
+       between, and 15px was written for a mouse. On a phone GR is 128, so
+       GR * 0.055 is 7 and the floor is what applies: the cell barely moves while
+       the globe halves, and a 15px cell under a 44px finger means most taps sit
+       inside more than one hit circle at once. Measured at 390x844: 114 of 128
+       tap points were ambiguous.
+
+       So the floor follows the pointer. This merges MORE events per mark on
+       touch, which used to be a loss of information and is not any more - the
+       panel now names everything in the cell. Deliberately not paired with a
+       bigger hit radius: that grows the same ambiguity it is meant to fix. */
+    CELL = Math.max(COARSE.matches ? 24 : 15, GR * 0.055);
     NG = clusterInto(m, CELL);
   } else {
     CELL = 0;

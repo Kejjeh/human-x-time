@@ -286,6 +286,10 @@ function endGlobeDrag(e) {
        So the one thing a phone user can do to a marker had no visible answer.
        Give the tap the tip. */
     if (e.pointerType && e.pointerType !== 'mouse') showTip(best);
+    // ...and then the panel, which is the rest of the answer. Only on a
+    // selection: a tap on empty ocean clears it, and scrolling to "Nothing
+    // selected" would be a punishment for missing.
+    if (best) bringDetailIntoView();
   }
 }
 /* Lifting a finger mid-pinch must not end the gesture, and must not be read as a
@@ -500,10 +504,14 @@ elDetail.addEventListener('click', e => {
   const c = e.target.closest('[data-cat]');
   if (c) { setCategory(S.cat === c.dataset.cat ? '' : c.dataset.cat); return; }
   const b = e.target.closest('[data-q]'); if (!b) return;
-  /* A link in the "also at this mark" list is the one panel link that must not
-     drop the list it came out of - every one of its targets is inside the same
-     cell, so the membership it describes is still exactly true. */
-  setSelection(b.dataset.q, b.dataset.here ? S.group : null);
+  /* A link in the "also at this mark" list is the one panel link that neither
+     flies nor drops its list: every target is inside the same cell, already on
+     screen at the mark you are looking at, so the membership it describes stays
+     exactly true and there is nothing to fly to. */
+  if (b.dataset.here) { setSelection(b.dataset.q, S.group); return; }
+  const ev = BY_Q[b.dataset.q];
+  if (!ev) return;
+  revealEvent(ev.i);
   elDetail.scrollTop = 0;
 });
 document.getElementById('btn-cluster').addEventListener('click', e => {
@@ -568,6 +576,28 @@ function bringStageIntoView() {
   } catch (_) { stage.scrollIntoView(true); }
 }
 
+/* A tap on a marker must land somewhere you can see.
+ *
+ * setSelection is the single funnel, and `.instrument` - which holds the whole
+ * detail panel - is the third grid row under a 46vh stage. Measured at 390x844:
+ * the panel sits at y=993 on an 855px viewport, 138px below the fold, and it
+ * does not move when the selection changes. So the one thing a phone visitor
+ * can do to a marker had its answer entirely off-screen.
+ *
+ * Driven by the CALL SITE, not by a heuristic: only a tap on the canvas scrolls.
+ * Escape clearing the selection must not, a selection restored from a URL must
+ * not, and a click in the panel must not - that one already flies the globe, and
+ * scrolling away from it at the same time would be two answers at once. */
+function bringDetailIntoView() {
+  if (!COARSE.matches) return;
+  if (document.documentElement.scrollHeight <= window.innerHeight + 1) return;
+  const r = elDetail.getBoundingClientRect();
+  if (r.top >= 0 && r.top < window.innerHeight * 0.6) return;
+  try {
+    elDetail.scrollIntoView({ block: 'start', behavior: RM.matches ? 'auto' : 'smooth' });
+  } catch (_) { elDetail.scrollIntoView(true); }
+}
+
 function flyToEvent(i) {
   const e = EV[i];
   if (!e) return;
@@ -610,7 +640,7 @@ function render(dt) {
   if (needRail) { drawRail(); needRail = false; }
   if (needPanel) {
     const F = q();
-    renderDetail(); renderThemes(); renderLens(); renderCatPin();
+    renderDetail(); renderThemes(); renderLens(); renderCatPin(); announce();
     document.getElementById('hdr-count').textContent = EV.length.toLocaleString();
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();

@@ -97,8 +97,15 @@ function closeResults() {
 
 /* Turning up at the right place is not enough: a result can be invisible under
    the current coverage floor, outside the time window, or in a theme that has
-   been switched off. Choosing it opens whatever is in the way. */
-function chooseEvent(i) {
+   been switched off. Choosing it opens whatever is in the way.
+
+   Split out from chooseEvent so the detail panel can use it too. A click on a
+   name inside the panel used to be `setSelection(b.dataset.q)` - forty lines of
+   this bypassed, and the globe left wherever it happened to be pointing, so the
+   thing you just chose could be selected and named on the far side of the
+   planet. The two routes into a selection now agree; chooseEvent is this plus
+   the two lines that belong to the search box. */
+function revealEvent(i) {
   const e = EV[i];
   if (!e) return;
   // Math.max(1, ...) here meant an event carried by no edition at all could be
@@ -124,6 +131,11 @@ function chooseEvent(i) {
     S.win.t1 = Math.max(120, Math.min(T_MAX, e.t * 1.8 + 60));
   }
   flyToEvent(i);
+}
+
+function chooseEvent(i) {
+  if (!EV[i]) return;
+  revealEvent(i);
   closeResults();
   elSearch.blur();
 }
