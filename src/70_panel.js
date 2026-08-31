@@ -111,12 +111,42 @@ function renderDetail() {
         radiometric date it would not be, which is why the sibling site works differently.</p>
     </div>
 
+    ${alsoHere(e)}
+
     ${near.length ? `<div class="sect nearby">
       <span class="lbl">Nearest in time</span>
       ${near.map(x => `<button class="pick" data-q="${esc(x.q)}">
         <span class="y num">${fmtYear(x.y)}</span>
         <span class="t">${esc(x.n)}</span></button>`).join('')}
     </div>` : ''}`;
+}
+
+/* The tooltip has always said "+7 more here" over a cluster. This is the part
+   that keeps the promise: the rest of the cell, named, in one click each.
+
+   S.group is a snapshot taken at the moment of the click, in the projection that
+   was on screen then - so it is dropped as soon as the globe moves (dropGroup in
+   80_boot.js) rather than left to describe a view from three drags ago. The
+   caption says "cluster cell" rather than "place" on purpose: these events are
+   near each other ON SCREEN at this zoom, which is not the same claim as being
+   near each other on the ground, and at low zoom the difference is hundreds of
+   kilometres. */
+function alsoHere(sel) {
+  const g = S.group;
+  if (!g || g.total < 2) return '';
+  const rest = g.ids.map(i => EV[i]).filter(x => x && x.q !== sel.q);
+  if (!rest.length) return '';
+  const shown = rest.length + 1;                 // the selected one is in the cell too
+  return `<div class="sect nearby">
+      <span class="lbl">Also at this mark</span>
+      <p class="hint" style="margin:-4px 0 8px">${g.total.toLocaleString()} events share this
+        cluster cell${g.total > shown ? `; the ${shown} most widely remembered are listed` : ''}.
+        Zoom the globe to split it.</p>
+      ${rest.map(x => `<button class="pick" data-q="${esc(x.q)}" data-here="1">
+        <span class="y num">${fmtYear(x.y)}</span>
+        <span class="t">${esc(x.n)}</span>
+        <span class="c num">${x.sl}</span></button>`).join('')}
+    </div>`;
 }
 
 function renderThemes() {

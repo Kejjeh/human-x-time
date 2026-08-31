@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 78 checks, run against both built documents and wired into the build as a gate. The sibling
+outside, whether it works — 86 checks, run against both built documents and wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
@@ -157,10 +157,11 @@ live query.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
 - **A UX review found twelve, and two of those are about the sibling site.** Of
-  the ten that apply here, **three are closed**: a swipe scrolls the page instead
+  the ten that apply here, **four are closed**: a swipe scrolls the page instead
   of flinging the globe to the pole, the stage overlays clear AA in light mode,
-  and the keyboard reaches the time axis with both sliders announcing their value
-  in words rather than a bare number.
+  the keyboard reaches the time axis with both sliders announcing their value
+  in words rather than a bare number, and a cluster now names what is inside it
+  — the panel lists the cell's members, in the same count the tooltip printed.
 
   **Two are half-closed, and the open halves are the harder ones.** A tap on a
   marker now answers with the tooltip, but the detail panel still does not scroll
@@ -170,13 +171,12 @@ live query.
   every state change, and `#detail` is still `aria-live="polite"`, so a rail drag
   re-announces the entire thing on every pointer event.
 
-  **Five are untouched.** A click inside the panel calls `setSelection` directly
-  and bypasses the forty lines that open whatever is hiding its target. A cluster
-  resolves to one member and discards the rest while the tooltip promises "+7 more
-  here". The 62 Wikidata categories are collapsed to six themes and never offered
-  as an axis, so "show me the other cathedrals" is unaskable of 1,205 of them.
-  There is no guided path. And the language chips are inert spans on a page that
-  carries no `description`, no `og:` tags and no favicon.
+  **Four are untouched.** A click inside the panel calls `setSelection` directly
+  and bypasses the forty lines that open whatever is hiding its target. The 62
+  Wikidata categories are collapsed to six themes and never offered as an axis,
+  so "show me the other cathedrals" is unaskable of 1,205 of them. There is no
+  guided path. And the language chips are inert spans on a page that carries no
+  `description`, no `og:` tags and no favicon.
 
   See [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers
   this site and its sibling together.
