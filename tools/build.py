@@ -132,13 +132,56 @@ def main():
     if stray:
         sys.exit(f"FATAL: the corpus payload still carries {sorted(stray)!r} unescaped")
 
-    # The artifact host supplies its own <head>, so drop our meta tags there and
+    # The artifact host supplies its own <head>, so drop our head tags there and
     # keep only <title> (which the publisher reads) plus the inlined styles.
-    art = re.sub(r'^<meta [^>]*/>\n', '', head, flags=re.M) + "\n" + body + \
+    # <link rel="icon"> is not a <meta and the old rule walked straight past it,
+    # which would have put this page's favicon on a host document that never
+    # asked for one. Both are matched now, and the assertion below is what keeps
+    # the next tag from slipping through the same gap.
+    art_head = re.sub(r'^<(?:meta|link) [^>]*/>\n', '', head, flags=re.M)
+    # The notes that explain those tags go with them. They sit above <style> and
+    # are addressed to someone reading src/00_head.html; leaving a comment about
+    # og:image inside a host's document, next to no og:image, is just litter.
+    cut = art_head.find("<style>")
+    if cut > 0:
+        art_head = re.sub(r'<!--.*?-->\n?', '', art_head[:cut], flags=re.S) + art_head[cut:]
+    art = art_head + "\n" + body + \
         '\n<script>\n' + js + '\n</script>\n'
+    leaked = re.findall(r'^<(?:meta|link)\b[^>]*>', art, flags=re.M)
+    if leaked:
+        sys.exit("FATAL: artifact.html would carry head tags into its host: "
+                 + ", ".join(t[:70] for t in leaked))
+
     out_art = os.path.join(ROOT, "artifact.html")
     with open(out_art, "w", encoding="utf-8") as f:
         f.write(art)
+
+    # What a scraper and a browser tab get. All of it is in the head of the two
+    # standalone documents and none of it in artifact.html, which a host owns.
+    #
+    # og:image is checked against the file it names, extension and magic bytes
+    # both: preview shipped as .png with FF D8 FF at the front, and GitHub Pages
+    # sets Content-Type from the extension, so the crawler was handed JPEG bytes
+    # labelled image/png and several validators reject that outright.
+    want = ['name="description"', 'property="og:title"', 'property="og:url"',
+            'property="og:image"', 'name="twitter:card"', 'rel="icon"']
+    absent = [w for w in want if w not in head]
+    if absent:
+        sys.exit(f"FATAL: the document head is missing {absent}")
+    img = re.search(r'property="og:image" content="(https://[^"]+)"', head)
+    if not img:
+        sys.exit("FATAL: og:image must be an absolute https URL; scrapers refuse a relative one")
+    name = img.group(1).rsplit("/", 1)[-1]
+    path = os.path.join(ROOT, name)
+    if not os.path.exists(path):
+        sys.exit(f"FATAL: og:image names {name}, which is not in the repository")
+    with open(path, "rb") as fh:
+        magic = fh.read(4)
+    kind = ("jpg" if magic[:3] == b"\xff\xd8\xff" else
+            "png" if magic == b"\x89PNG" else "?")
+    if not name.lower().endswith("." + kind):
+        sys.exit(f"FATAL: {name} is {kind} data under a .{name.rsplit('.', 1)[-1]} name; "
+                 f"GitHub Pages types it from the extension and validators reject the mismatch")
 
     out_std = os.path.join(ROOT, "human-x-time.html")
     with open(out_std, "w", encoding="utf-8") as f:

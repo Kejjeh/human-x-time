@@ -52,12 +52,26 @@
       <button class="iconbtn" id="btn-basemap" aria-pressed="true">Satellite</button>
       <button class="iconbtn" id="btn-plates" aria-pressed="false">Plates</button>
       <button class="iconbtn" id="btn-theme">Theme</button>
+      <button class="iconbtn" id="btn-tour">Show me</button>
     </div>
 
     <!-- aria-hidden, not role="status". The tip is rewritten on every hover
          pointermove, so as a live region it flooded exactly the same way the
          panel did - and it never says anything #say does not. -->
     <div class="tip" id="tip" aria-hidden="true"></div>
+
+    <!-- The guided path. Every step moves a CONTROL rather than flying to a
+         point: no single one of 38,242 events is the argument, the shape of the
+         set is. Hidden until asked for. -->
+    <div class="tour" id="tour" hidden>
+      <p class="tour-t" id="tour-text" aria-live="polite"></p>
+      <div class="tour-b">
+        <span class="tour-n num" id="tour-n"></span>
+        <button class="iconbtn" id="tour-prev">Back</button>
+        <button class="iconbtn" id="tour-next">Next</button>
+        <button class="iconbtn" id="tour-end">Close</button>
+      </div>
+    </div>
   </main>
 
   <aside class="rail">

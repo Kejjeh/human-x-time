@@ -510,6 +510,81 @@ def run(url, headed, report):
         page.evaluate("""() => { S.kt = 40; S.themes = new Set(THEMES);
           S.win = { t0: 0, t1: 3200 }; TW = null; setSelection(null); renderNow(); }""")
         page.wait_for_timeout(120)
+        # ------------------------------------------------------- the guided path
+        #
+        # Every step has to move a CONTROL. A tour that only narrates is a page
+        # of prose over a globe, and the sibling site's fly-between-points shape
+        # is the wrong one here: no single event out of 38,242 is the argument.
+        page.evaluate("""() => { TW = null; S.spin.lam = 0; S.spin.phi = 0;
+          setSelection(null); changed(); renderNow(); }""")
+        page.click("#btn-tour")
+        page.wait_for_timeout(300)
+        steps = []
+        for i in range(5):
+            steps.append(page.evaluate("""() => ({
+              n: document.getElementById('tour-n').textContent,
+              text: document.getElementById('tour-text').innerText.replace(/\\s+/g, ' '),
+              kt: S.kt, lens: S.lens, sel: S.selection, win: [S.win.t0, S.win.t1],
+              lensCtl: document.getElementById('lens').value,
+              shown: q().n, rot: [Math.round(S.rot.lam), Math.round(S.rot.phi)] })"""))
+            if i < 4:
+                page.click("#tour-next")
+                page.wait_for_timeout(1300)
+        moved = sum(1 for a, b in zip(steps, steps[1:])
+                    if (a["shown"], a["rot"], a["win"]) != (b["shown"], b["rot"], b["win"]))
+        report.check("every step of the guided path moves a control",
+                     moved == 4,
+                     f"{moved} of 4 transitions changed the view; "
+                     + " -> ".join(str(s["shown"]) for s in steps))
+        report.check("the guided path never selects anything",
+                     all(s["sel"] is None for s in steps),
+                     f"selections: {[s['sel'] for s in steps]}")
+        # renderLens returns early forever once dataset.built is set, so setting
+        # S.lens and calling changed() leaves the <select> reading "Every
+        # edition" over a filtered globe. syncControls is what writes the value.
+        lens_step = next((s for s in steps if s["lens"]), None)
+        report.check("the lens step moves the dropdown, not just the query",
+                     lens_step is not None and lens_step["lensCtl"] == lens_step["lens"],
+                     f"S.lens={lens_step['lens']!r}, <select> reads "
+                     f"{lens_step['lensCtl']!r}" if lens_step else "no step set a lens")
+        # The corpus is regenerated from Wikidata, so a figure written into the
+        # prose would be quietly wrong by the next run. Every number the steps
+        # quote has to come out of the live query.
+        import re as _re
+        quoted, wrong = 0, []
+        for s in steps:
+            # Comma-grouped only: that is what toLocaleString produces, so it
+            # picks out the counts and leaves the year labels ("1175 BCE") and
+            # the floor alone - those are live too, and checked by the steps
+            # above rather than here.
+            for m in _re.findall(r"\b(\d{1,3}(?:,\d{3})+)\b", s["text"]):
+                v = int(m.replace(",", ""))
+                if v == 75000:                  # the axis constant, not a count
+                    continue
+                quoted += 1
+                if v != s["shown"] and not any(v == t["shown"] for t in steps):
+                    wrong.append(f"{m} in step {s['n']}")
+        report.check("the numbers in the prose come out of the live query",
+                     quoted >= 3 and not wrong,
+                     f"{quoted} figures quoted, mismatched: {wrong or 'none'}")
+        page.click("#tour-prev")
+        page.wait_for_timeout(1300)
+        back_n = page.evaluate("q().n")
+        back_label = page.evaluate("document.getElementById('tour-n').textContent")
+        report.check("Back returns the guided path to the previous view",
+                     back_n == steps[3]["shown"] and back_label == "4 / 5",
+                     f"{back_n} events against {steps[3]['shown']}, at step {back_label}")
+        page.click("#tour-end")
+        page.wait_for_timeout(200)
+        closed = page.evaluate("document.getElementById('tour').hidden")
+        report.check("the guided path closes and leaves the view it built",
+                     closed is True and page.evaluate("q().n") == steps[3]["shown"],
+                     f"hidden={closed}, {page.evaluate('q().n')} events still shown")
+        page.evaluate("""() => { S.kt = 40; S.lens = ''; S.cat = ''; S.themes = new Set(THEMES);
+          S.win = { t0: 0, t1: 3200 }; S.rot.lam = -10; S.rot.phi = 25; TW = null;
+          S.spin.lam = 0; S.spin.phi = 0; syncControls(); setSelection(null);
+          changed(); renderNow(); }""")
+        page.wait_for_timeout(200)
 
         # 43 codes under "Who remembers it" were inert spans on the one site whose
         # whole argument is which editions carry an article.
@@ -978,7 +1053,7 @@ def run(url, headed, report):
                                 [74000, 75000], [11990, 12010], [500, 560],
                                 [30000, 31000], [2000, 2400], [6000, 6020]]) {
             setWindow(a, b); invalidate(); seen.length = 0; drawChron();
-            const lab = seen.filter(s => /xt-mono/.test(s.f) && /9\.5px/.test(s.f)).map(s => s.t);
+            const lab = seen.filter(s => /xt-mono/.test(s.f) && /9[.]5px/.test(s.f)).map(s => s.t);
             if (!lab.length) blank.push(`${a}-${b}`);
             if (new Set(lab).size !== lab.length) dup.push(`${a}-${b}: ${lab.join(' ')}`);
           }
@@ -1299,7 +1374,7 @@ def run(url, headed, report):
                   stageW: Math.round(st.r - st.l)};
         }""")
         widths = [(390, 844), (700, 900), (1000, 900), (1100, 900), (1440, 900)]
-        bad, clipped = [], []
+        bad, clipped, unreachable = [], [], []
         for w, h in widths:
             page.set_viewport_size({"width": w, "height": h})
             page.wait_for_timeout(320)
@@ -1315,18 +1390,33 @@ def run(url, headed, report):
                               tl.t >= st.t - 1 && tl.b <= st.b + 1,
                       clipped: rh.scrollWidth > rh.clientWidth + 1,
                       hw: rh.scrollWidth, bw: rh.clientWidth,
+                      /* A shrink-to-fit row anchored right does not clip when it
+                         runs out of room - it runs off the LEFT edge, inside
+                         .stage's overflow:hidden, where nothing can reach it.
+                         Five buttons need 365px and a 390px stage has 274. */
+                      offLeft: [...document.querySelectorAll('.stage-tr .iconbtn')]
+                        .filter(b => b.getBoundingClientRect().left < st.l - 1)
+                        .map(b => b.textContent.trim()),
+                      scrolls: (() => { const r = document.querySelector('.stage-tr');
+                        return r.scrollWidth > r.clientWidth + 1; })(),
                       stageW: Math.round(st.r - st.l)};
             }""")
             if o["overlap"] or not o["inside"]:
                 bad.append(f"{w}px (stage {o['stageW']})")
             if o["clipped"]:
                 clipped.append(f"{w}px: {o['hw']}/{o['bw']}px")
+            if o["offLeft"]:
+                unreachable.append(f"{w}px: {', '.join(o['offLeft'])}")
         page.set_viewport_size({"width": 1280, "height": 800})
         page.wait_for_timeout(400)
         report.check("the stage overlays never sit on top of each other",
                      not bad,
                      "collide at " + ", ".join(bad) if bad
                      else f"clear at {len(widths)} widths, stage 298 to 988px")
+        report.check("no stage button runs off the edge it cannot be scrolled to",
+                     not unreachable,
+                     "; ".join(unreachable) or
+                     "five buttons, all reachable from 390 to 1440px")
         report.check("the rail heading is never clipped mid-word",
                      not clipped,
                      "; ".join(clipped) or "fits at every rail width")
