@@ -11,6 +11,9 @@ const DATA      = /*@EVENTS@*/;
 const PRESENT = 2026;            // ybp is measured from here
 const T_MAX   = 75000;           // the corpus reaches ~71,860 BCE
 const RM = matchMedia('(prefers-reduced-motion: reduce)');
+/* Live, not a boolean snapshot: a laptop with a touchscreen changes this when
+   the pointer changes, and a tab moved between displays changes it too. */
+const COARSE = matchMedia('(pointer: coarse)');
 
 /* ---------------------------------------------------------------- decoding */
 const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-';

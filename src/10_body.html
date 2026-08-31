@@ -28,7 +28,13 @@
       <p class="hint" id="lens-hint"></p>
     </div>
 
-    <div class="detail" id="detail" tabindex="-1" aria-live="polite"></div>
+    <!-- Not the live region any more. renderDetail reassigns the whole of this
+         element, and every one of setKt / setWindow / setSelection / setCoverage
+         reaches it: a rail drag re-announced ten kilobytes of panel on every
+         pointer event. The announcement is one line in #say instead, written
+         only when it changes. tabindex stays: the panel is a focus target. -->
+    <div class="detail" id="detail" tabindex="-1"></div>
+    <p class="sr" id="say" role="status" aria-live="polite"></p>
   </aside>
 
   <main class="stage" id="stage">
@@ -48,7 +54,10 @@
       <button class="iconbtn" id="btn-theme">Theme</button>
     </div>
 
-    <div class="tip" id="tip" role="status"></div>
+    <!-- aria-hidden, not role="status". The tip is rewritten on every hover
+         pointermove, so as a live region it flooded exactly the same way the
+         panel did - and it never says anything #say does not. -->
+    <div class="tip" id="tip" aria-hidden="true"></div>
   </main>
 
   <aside class="rail">

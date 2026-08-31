@@ -87,6 +87,11 @@ def run(url, headed, report):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
         # has_touch so CDP can dispatch real multi-touch at the pinch handler.
+        # Note what that costs, because it is not obvious: Chromium reports
+        # `pointer: coarse` for any context with touch, so every check run
+        # against this page takes the coarse-pointer branch of anything that
+        # asks - the cluster cell floor among them. The fine-pointer branch gets
+        # its own context at the end of the run; see fine_pointer().
         ctx = browser.new_context(viewport={"width": 1440, "height": 900},
                                   device_scale_factor=1, has_touch=True)
         page = ctx.new_page()
@@ -315,6 +320,111 @@ def run(url, headed, report):
           return ok;
         }""")
         report.check("choosing a result outside the pinned category unpins it", unpin)
+
+        # ------------------------------------- the panel, and who it announces to
+        #
+        # renderDetail reassigned innerHTML unconditionally from the needPanel
+        # block, and needPanel is set by markAll() inside changed(), which every
+        # one of setCoverage / setWindow / setSelection / a theme toggle calls.
+        # So every pointermove of a rail drag destroyed and rebuilt the panel -
+        # the exact gesture the README sells - and #detail was the aria-live
+        # region while it happened.
+        panel = page.evaluate("""() => {
+          const el = document.getElementById('detail'), say = document.getElementById('say');
+          const ih = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+          const tc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+          let writes = 0, says = 0;
+          Object.defineProperty(el, 'innerHTML', { configurable: true,
+            set(v) { writes++; ih.set.call(this, v); }, get() { return ih.get.call(this); } });
+          Object.defineProperty(say, 'textContent', { configurable: true,
+            set(v) { says++; tc.set.call(this, v); }, get() { return tc.get.call(this); } });
+
+          const st = { kt: S.kt, w: { ...S.win }, sel: S.selection };
+          S.win = { t0: 0, t1: 3200 };
+          setSelection(EV.find(x => x.sl > 120).q); renderNow();
+          writes = 0; says = 0;
+          let steps = 0;
+          for (let n = 120; n >= 40; n--) { setCoverage(n); renderNow(); steps++; }
+          const scrub = { steps, writes, says };
+
+          /* focus has to survive a rebuild: the delegated handler fires on a
+             button whose subtree is then replaced, and activeElement dropped to
+             <body> on every hop */
+          let focusKept = null;
+          const b = el.querySelector('[data-q]');
+          if (b) {
+            b.focus();
+            const want = b.getAttribute('data-q');
+            setCoverage(1); renderNow();      // forces a real rewrite
+            const now = document.activeElement;
+            focusKept = { want, got: now && now.getAttribute && now.getAttribute('data-q'),
+                          inside: el.contains(now) };
+          }
+          delete el.innerHTML; delete say.textContent;
+          S.kt = st.kt; S.win = st.w; setSelection(st.sel); renderNow();
+          return { scrub, focusKept,
+                   detailLive: el.getAttribute('aria-live'),
+                   detailTab: el.getAttribute('tabindex'),
+                   sayLive: say.getAttribute('aria-live'),
+                   sayRole: say.getAttribute('role'),
+                   tipRole: document.getElementById('tip').getAttribute('role'),
+                   tipHidden: document.getElementById('tip').getAttribute('aria-hidden') };
+        }""")
+        sc = panel["scrub"]
+        report.check("scrubbing the coverage floor does not rebuild the panel each step",
+                     sc["writes"] * 3 < sc["steps"],
+                     f"{sc['writes']} rebuilds across {sc['steps']} steps")
+        report.check("a scrub is not announced once per step",
+                     sc["says"] <= 1,
+                     f"{sc['says']} announcements across {sc['steps']} steps")
+        report.check("the panel is no longer the live region",
+                     panel["detailLive"] is None and panel["sayLive"] == "polite"
+                     and panel["sayRole"] == "status" and panel["detailTab"] == "-1",
+                     f"#detail aria-live={panel['detailLive']!r}, #say={panel['sayRole']!r}/"
+                     f"{panel['sayLive']!r}")
+        report.check("the tooltip is not a second live region",
+                     panel["tipRole"] is None and panel["tipHidden"] == "true",
+                     f"#tip role={panel['tipRole']!r} aria-hidden={panel['tipHidden']!r}")
+        fk = panel["focusKept"]
+        if fk:
+            report.check("focus survives a panel rebuild",
+                         fk["got"] == fk["want"] and fk["inside"],
+                         f"focus was on {fk['want']!r}, landed on {fk['got']!r}")
+
+        # A click on a name inside the panel was setSelection and nothing else -
+        # forty lines of chooseEvent bypassed and the globe left pointing wherever
+        # it happened to be, so the thing just chosen could be selected, named,
+        # and on the far side of the planet.
+        goto = page.evaluate("""() => {
+          S.kt = 1; S.win = { t0: 0, t1: T_MAX }; setSelection(null); renderNow();
+          const target = q().events.find(e => Math.abs(-e.lng - S.rot.lam) > 120 && e.sl > 5);
+          if (!target) return null;
+          /* hide it behind the coverage floor and its own theme, the two things
+             a panel click used to walk straight past */
+          S.kt = target.sl + 20;
+          S.themes = new Set(THEMES.filter(t => t !== target.theme));
+          invalidate();
+          const hiddenBefore = !q().events.some(e => e.q === target.q);
+          const lam0 = S.rot.lam;
+          const el = document.getElementById('detail');
+          el.innerHTML = `<button class="pick" data-q="${target.q}">x</button>`;
+          el.querySelector('[data-q]').click();
+          return { hiddenBefore, lam0, target: target.q, flying: !!TW,
+                   sel: S.selection, kt: S.kt, themeOn: S.themes.has(target.theme),
+                   visible: q().events.some(e => e.q === target.q) };
+        }""")
+        if goto:
+            report.check("a click inside the panel opens whatever is hiding its target",
+                         goto["sel"] == goto["target"] and goto["visible"]
+                         and goto["hiddenBefore"] and goto["themeOn"],
+                         f"hidden before={goto['hiddenBefore']}, visible after={goto['visible']}, "
+                         f"theme reopened={goto['themeOn']}")
+            report.check("a click inside the panel flies the globe to it",
+                         goto["flying"],
+                         "camera tween started" if goto["flying"] else "no camera tween was started")
+        page.evaluate("""() => { S.kt = 40; S.themes = new Set(THEMES);
+          S.win = { t0: 0, t1: 3200 }; TW = null; setSelection(null); renderNow(); }""")
+        page.wait_for_timeout(120)
 
         # 43 codes under "Who remembers it" were inert spans on the one site whose
         # whole argument is which editions carry an article.
@@ -841,8 +951,24 @@ def run(url, headed, report):
           Object.defineProperty(tip, 'offsetWidth',
             { get() { measures++; return ow.get.call(this); }, configurable: true });
 
+          /* The first target with a big enough radius is not good enough: hit
+             targets are appended in DRAW order, so index 0 is at the back, and
+             anything painted over it wins the frontmost test. Jittering a pixel
+             inside it then lands on a different marker and the tip rebuilds -
+             correctly. Pick one that hitTest agrees is the marker on top at its
+             own centre, so this measures churn and not overlap. */
           let k = -1;
-          for (let i = 0; i < HN; i++) if (HR[i] > 10) { k = i; break; }
+          for (let i = HN - 1; i >= 0; i--) {
+            if (HR[i] <= 10) continue;
+            const h = hitTest(HX[i], HY[i]);
+            if (!h || h.i !== HI[i] || h.n !== HC[i]) continue;
+            let clear = true;
+            for (const [dx, dy] of [[-1, -1], [1, 1], [1, -1], [-1, 1]]) {
+              const j = hitTest(HX[i] + dx, HY[i] + dy);
+              if (!j || j.i !== HI[i]) { clear = false; break; }
+            }
+            if (clear) { k = i; break; }
+          }
           const out = { found: k >= 0 };
           if (k >= 0) {
             const box = realRect.call(gcv);
@@ -1217,8 +1343,9 @@ def run(url, headed, report):
         # stylesheet hands vertical gestures back to the browser under a coarse
         # pointer, and the handler stays out of the way while a gesture still
         # looks vertical, because the moves before the browser decides still
-        # arrive here. This context has no touch emulation, so the gesture is
-        # driven straight at the handler with the pointerType it keys on.
+        # arrive here. The gesture is driven as synthetic PointerEvents rather
+        # than through the touchscreen, so it reaches the handler with exactly
+        # the pointerType it keys on and without the browser consuming it first.
         rule = page.evaluate("""() => {
           for (const sheet of document.styleSheets) {
             let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
@@ -1328,6 +1455,94 @@ def run(url, headed, report):
         browser.close()
 
 
+def fine_pointer(url, headed, report):
+    """The mouse. The main run asks for touch so the pinch handler can be driven,
+    and Chromium answers `pointer: coarse` to everything for the whole session -
+    so without this the fine-pointer branch of the cluster cell floor would never
+    execute in the gate at all.
+
+    Same viewport as a phone on purpose: that is where the two floors differ.
+    GR is 128 there, so GR * 0.055 is 7 and the floor is the only thing deciding
+    the cell."""
+    from playwright.sync_api import sync_playwright
+
+    amb = """() => {
+      let ambiguous = 0;
+      for (let k = 0; k < HN; k++) {
+        let hits = 0;
+        for (let j = 0; j < HN; j++) {
+          const dx = HX[j] - HX[k], dy = HY[j] - HY[k];
+          if (dx * dx + dy * dy < HR[j] * HR[j]) hits++;
+        }
+        if (hits > 1) ambiguous++;
+      }
+      return { coarse: COARSE.matches, cell: CELL, ambiguous, targets: HN };
+    }"""
+    out = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not headed)
+        for name, touch in (("fine", False), ("coarse", True)):
+            ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                                      device_scale_factor=2, has_touch=touch)
+            page = ctx.new_page()
+            page.goto(url, wait_until="load", timeout=60000)
+            page.wait_for_function("window.__BOOT_OK === true", timeout=30000)
+            page.wait_for_timeout(500)
+            out[name] = page.evaluate(amb)
+            if touch:
+                # A tap on a marker: the whole detail panel is the third grid row
+                # under a 46vh stage, measured at y=1011 on an 844px viewport, and
+                # it does not move when the selection changes. The one thing a
+                # phone visitor can do to a marker had its answer off-screen.
+                pos = page.evaluate("""() => {
+                  const r = gcv.getBoundingClientRect();
+                  for (let i = HN - 1; i >= 0; i--)
+                    if (HX[i] > 60 && HY[i] > 60 && HX[i] < GW - 60 && HY[i] < GH - 60)
+                      return { x: r.left + HX[i], y: r.top + HY[i] };
+                  return null;
+                }""")
+                before = page.evaluate(
+                    "Math.round(document.getElementById('detail').getBoundingClientRect().top)")
+                if pos:
+                    page.touchscreen.tap(pos["x"], pos["y"])
+                    page.wait_for_timeout(900)
+                after = page.evaluate("""() => ({
+                  sel: S.selection,
+                  top: Math.round(document.getElementById('detail').getBoundingClientRect().top),
+                  vh: window.innerHeight })""")
+                report.check("a tap on a marker brings the answer into view",
+                             bool(pos) and after["sel"] is not None
+                             and after["top"] < after["vh"] * 0.75 < before,
+                             f"the panel was at y={before}, and after the tap at "
+                             f"y={after['top']} in a {after['vh']}px viewport")
+                # ...and clearing a selection must not scroll: missing a marker
+                # should not be punished with a jump to "Nothing selected".
+                page.evaluate("window.scrollTo(0, 0)")
+                page.wait_for_timeout(300)
+                page.evaluate("setSelection(null)")
+                page.wait_for_timeout(500)
+                report.check("clearing a selection does not scroll the page",
+                             page.evaluate("Math.round(window.scrollY)") == 0,
+                             f"scrollY={page.evaluate('Math.round(window.scrollY)')}")
+            ctx.close()
+        browser.close()
+
+    f, c = out["fine"], out["coarse"]
+    report.check("the cluster cell floor follows the pointer",
+                 f["coarse"] is False and c["coarse"] is True
+                 and f["cell"] == 15 and c["cell"] > f["cell"],
+                 f"mouse {f['cell']}px, finger {c['cell']}px, on the same 390px globe")
+    # A 15px cell under a 44px finger means most taps sit inside more than one
+    # hit circle at once, and a bigger hit radius grows the same ambiguity it is
+    # meant to fix - so the cell is what moves.
+    fr = f["ambiguous"] / max(1, f["targets"])
+    cr = c["ambiguous"] / max(1, c["targets"])
+    report.check("a finger-sized cell leaves fewer marks a tap cannot tell apart",
+                 cr < fr * 0.75,
+                 f"{f['ambiguous']}/{f['targets']} of the mouse's marks are ambiguous "
+                 f"({fr:.0%}), against {c['ambiguous']}/{c['targets']} of the finger's ({cr:.0%})")
+
+
 # The artifact variant, wrapped the way a host wraps it.
 #
 # build.py emits two documents and this gate only ever loaded one. artifact.html
@@ -1391,6 +1606,7 @@ def main():
     report = Report()
     try:
         run(url, a.headed, report)
+        fine_pointer(url, a.headed, report)
     finally:
         if httpd:
             httpd.shutdown()

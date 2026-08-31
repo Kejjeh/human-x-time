@@ -208,6 +208,11 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .search-note { margin:6px 0 0; font-size:10.5px; color:var(--chalk-faint); }
 
 /* ================================================================= DETAIL */
+/* Off-screen but still announced. Not display:none and not visibility:hidden -
+   both take the node out of the accessibility tree, and a live region that is
+   not in the tree announces nothing at all. */
+.sr { position:absolute; width:1px; height:1px; margin:-1px; padding:0; border:0;
+  overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }
 .detail { flex:1 1 auto; overflow-y:auto; min-height:0; scrollbar-width:thin; }
 .detail::-webkit-scrollbar { width:8px; }
 .detail::-webkit-scrollbar-thumb { background:var(--panel-3); border-radius:4px; }
@@ -424,7 +429,13 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
       <p class="hint" id="lens-hint"></p>
     </div>
 
-    <div class="detail" id="detail" tabindex="-1" aria-live="polite"></div>
+    <!-- Not the live region any more. renderDetail reassigns the whole of this
+         element, and every one of setKt / setWindow / setSelection / setCoverage
+         reaches it: a rail drag re-announced ten kilobytes of panel on every
+         pointer event. The announcement is one line in #say instead, written
+         only when it changes. tabindex stays: the panel is a focus target. -->
+    <div class="detail" id="detail" tabindex="-1"></div>
+    <p class="sr" id="say" role="status" aria-live="polite"></p>
   </aside>
 
   <main class="stage" id="stage">
@@ -444,7 +455,10 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
       <button class="iconbtn" id="btn-theme">Theme</button>
     </div>
 
-    <div class="tip" id="tip" role="status"></div>
+    <!-- aria-hidden, not role="status". The tip is rewritten on every hover
+         pointermove, so as a live region it flooded exactly the same way the
+         panel did - and it never says anything #say does not. -->
+    <div class="tip" id="tip" aria-hidden="true"></div>
   </main>
 
   <aside class="rail">
@@ -494,6 +508,9 @@ const DATA      = {"v":2,"n":38242,"themes":["conflict","polity","disaster","set
 const PRESENT = 2026;            // ybp is measured from here
 const T_MAX   = 75000;           // the corpus reaches ~71,860 BCE
 const RM = matchMedia('(prefers-reduced-motion: reduce)');
+/* Live, not a boolean snapshot: a laptop with a touchscreen changes this when
+   the pointer changes, and a tab moved between displays changes it too. */
+const COARSE = matchMedia('(pointer: coarse)');
 
 /* ---------------------------------------------------------------- decoding */
 const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-';
@@ -1536,7 +1553,18 @@ function drawEvents() {
 
   PM = m;
   if (S.cluster) {
-    CELL = Math.max(15, GR * 0.055);
+    /* The cell floor is what decides how many separate things a tap can land
+       between, and 15px was written for a mouse. On a phone GR is 128, so
+       GR * 0.055 is 7 and the floor is what applies: the cell barely moves while
+       the globe halves, and a 15px cell under a 44px finger means most taps sit
+       inside more than one hit circle at once. Measured at 390x844: 114 of 128
+       tap points were ambiguous.
+
+       So the floor follows the pointer. This merges MORE events per mark on
+       touch, which used to be a loss of information and is not any more - the
+       panel now names everything in the cell. Deliberately not paired with a
+       bigger hit radius: that grows the same ambiguity it is meant to fix. */
+    CELL = Math.max(COARSE.matches ? 24 : 15, GR * 0.055);
     NG = clusterInto(m, CELL);
   } else {
     CELL = 0;
@@ -2051,6 +2079,50 @@ function topK(items, k, better) {
 }
 const byCoverage = (a, b) => a.sl > b.sl;
 
+/* The panel is rebuilt only when the panel changes.
+ *
+ * renderDetail reassigned elDetail.innerHTML unconditionally, from the needPanel
+ * block, and needPanel is set by markAll() inside changed(), which setCoverage,
+ * setWindow, setSelection and every theme and lens change all call. So every
+ * pointermove of a rail drag destroyed and rebuilt the panel. Three things fell
+ * out of that, and they are the reason this is not a micro-optimisation:
+ *
+ *   - It broke the site's own headline interaction. The README sells scrubbing
+ *     the coverage floor with something selected - precisely the gesture that
+ *     threw the reader back to the top of the panel on every step.
+ *   - Focus died. The delegated click handler fires on a button whose subtree is
+ *     then replaced, so activeElement dropped to <body> and the keyboard user
+ *     lost their place on every hop.
+ *   - #detail was the aria-live region. Announcing ten kilobytes of panel per
+ *     pointer event is not an announcement, it is a denial of service.
+ *
+ * The comparison is against the rendered string itself rather than a signature
+ * over the state that feeds it. A signature has to be kept in step by hand with
+ * everything the template reads - the near list, the cluster members, the pinned
+ * category, the coverage counts - and the failure mode when it drifts is a panel
+ * that silently stops updating. The string cannot drift from itself. Building it
+ * is a few bounded top-k passes; what this skips is the innerHTML parse, the
+ * layout, the destroyed focus and the announcement. */
+let lastDetailHTML = null;
+
+function writeDetail(html) {
+  if (html === lastDetailHTML) return false;
+  lastDetailHTML = html;
+  /* Put the reader back where they were. Restoring by data-q rather than by
+     index: the list can be a different length after the rewrite, and landing on
+     whatever is now fourth is worse than landing nowhere. */
+  const act = document.activeElement;
+  const keep = act && elDetail.contains(act) ? act.getAttribute('data-q') : null;
+  const top = elDetail.scrollTop;
+  elDetail.innerHTML = html;
+  elDetail.scrollTop = top;
+  if (keep) {
+    const again = elDetail.querySelector(`[data-q="${CSS.escape(keep)}"]`);
+    if (again) again.focus();
+  }
+  return true;
+}
+
 function renderDetail() {
   const F = q();
   if (!S.selection || !BY_Q[S.selection]) {
@@ -2059,7 +2131,7 @@ function renderDetail() {
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
     const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
-    elDetail.innerHTML = `
+    writeDetail(`
       <div class="empty">
         <strong>Nothing selected</strong>
         Click a marker. Clusters split as you zoom the globe.
@@ -2069,7 +2141,7 @@ function renderDetail() {
         ${thin.length ? `<p style="margin-top:14px"><strong>In this window, but not on English Wikipedia</strong></p>
           <ol>${thin.map(e => `<li><button class="pick" data-q="${esc(e.q)}">${esc(e.n)}</button>
             <span class="num" style="color:var(--chalk-faint)"> ${fmtYear(e.y)} · ${e.sl} langs</span></li>`).join('')}</ol>` : ''}
-      </div>`;
+      </div>`);
     return;
   }
 
@@ -2080,7 +2152,7 @@ function renderDetail() {
   const near = topK(F.events, 7, (a, b) => Math.abs(a.y - e.y) < Math.abs(b.y - e.y))
     .filter(x => x.q !== e.q).slice(0, 6);
 
-  elDetail.innerHTML = `
+  writeDetail(`
     <div class="dt-head">
       <button class="tag" type="button" data-cat="${esc(e.c)}"
         aria-pressed="${S.cat === e.c}"
@@ -2129,7 +2201,25 @@ function renderDetail() {
       ${near.map(x => `<button class="pick" data-q="${esc(x.q)}">
         <span class="y num">${fmtYear(x.y)}</span>
         <span class="t">${esc(x.n)}</span></button>`).join('')}
-    </div>` : ''}`;
+    </div>` : ''}`);
+}
+
+/* One line, in its own live region, written only when it changes.
+   This is what #detail used to be, minus the ten kilobytes and minus the flood:
+   a rail drag moves this string only when the number in it actually moves. */
+let lastSay = null;
+function announce() {
+  const F = q();
+  const e = S.selection && BY_Q[S.selection];
+  const say = e
+    ? `${e.n}, ${fmtYear(e.y)}, ${e.sl === 0 ? 'no Wikipedia article'
+        : `carried by ${e.sl} language edition${e.sl === 1 ? '' : 's'}`}.`
+    : `${F.events.length.toLocaleString()} events shown${
+        S.cat ? `, ${CAT_LABEL[S.cat] || S.cat} only` : ''}.`;
+  if (say === lastSay) return;
+  lastSay = say;
+  const el = document.getElementById('say');
+  if (el) el.textContent = say;
 }
 
 /* The tooltip has always said "+7 more here" over a cluster. This is the part
@@ -2303,8 +2393,15 @@ function closeResults() {
 
 /* Turning up at the right place is not enough: a result can be invisible under
    the current coverage floor, outside the time window, or in a theme that has
-   been switched off. Choosing it opens whatever is in the way. */
-function chooseEvent(i) {
+   been switched off. Choosing it opens whatever is in the way.
+
+   Split out from chooseEvent so the detail panel can use it too. A click on a
+   name inside the panel used to be `setSelection(b.dataset.q)` - forty lines of
+   this bypassed, and the globe left wherever it happened to be pointing, so the
+   thing you just chose could be selected and named on the far side of the
+   planet. The two routes into a selection now agree; chooseEvent is this plus
+   the two lines that belong to the search box. */
+function revealEvent(i) {
   const e = EV[i];
   if (!e) return;
   // Math.max(1, ...) here meant an event carried by no edition at all could be
@@ -2330,6 +2427,11 @@ function chooseEvent(i) {
     S.win.t1 = Math.max(120, Math.min(T_MAX, e.t * 1.8 + 60));
   }
   flyToEvent(i);
+}
+
+function chooseEvent(i) {
+  if (!EV[i]) return;
+  revealEvent(i);
   closeResults();
   elSearch.blur();
 }
@@ -2840,6 +2942,10 @@ function endGlobeDrag(e) {
        So the one thing a phone user can do to a marker had no visible answer.
        Give the tap the tip. */
     if (e.pointerType && e.pointerType !== 'mouse') showTip(best);
+    // ...and then the panel, which is the rest of the answer. Only on a
+    // selection: a tap on empty ocean clears it, and scrolling to "Nothing
+    // selected" would be a punishment for missing.
+    if (best) bringDetailIntoView();
   }
 }
 /* Lifting a finger mid-pinch must not end the gesture, and must not be read as a
@@ -3054,10 +3160,14 @@ elDetail.addEventListener('click', e => {
   const c = e.target.closest('[data-cat]');
   if (c) { setCategory(S.cat === c.dataset.cat ? '' : c.dataset.cat); return; }
   const b = e.target.closest('[data-q]'); if (!b) return;
-  /* A link in the "also at this mark" list is the one panel link that must not
-     drop the list it came out of - every one of its targets is inside the same
-     cell, so the membership it describes is still exactly true. */
-  setSelection(b.dataset.q, b.dataset.here ? S.group : null);
+  /* A link in the "also at this mark" list is the one panel link that neither
+     flies nor drops its list: every target is inside the same cell, already on
+     screen at the mark you are looking at, so the membership it describes stays
+     exactly true and there is nothing to fly to. */
+  if (b.dataset.here) { setSelection(b.dataset.q, S.group); return; }
+  const ev = BY_Q[b.dataset.q];
+  if (!ev) return;
+  revealEvent(ev.i);
   elDetail.scrollTop = 0;
 });
 document.getElementById('btn-cluster').addEventListener('click', e => {
@@ -3122,6 +3232,28 @@ function bringStageIntoView() {
   } catch (_) { stage.scrollIntoView(true); }
 }
 
+/* A tap on a marker must land somewhere you can see.
+ *
+ * setSelection is the single funnel, and `.instrument` - which holds the whole
+ * detail panel - is the third grid row under a 46vh stage. Measured at 390x844:
+ * the panel sits at y=993 on an 855px viewport, 138px below the fold, and it
+ * does not move when the selection changes. So the one thing a phone visitor
+ * can do to a marker had its answer entirely off-screen.
+ *
+ * Driven by the CALL SITE, not by a heuristic: only a tap on the canvas scrolls.
+ * Escape clearing the selection must not, a selection restored from a URL must
+ * not, and a click in the panel must not - that one already flies the globe, and
+ * scrolling away from it at the same time would be two answers at once. */
+function bringDetailIntoView() {
+  if (!COARSE.matches) return;
+  if (document.documentElement.scrollHeight <= window.innerHeight + 1) return;
+  const r = elDetail.getBoundingClientRect();
+  if (r.top >= 0 && r.top < window.innerHeight * 0.6) return;
+  try {
+    elDetail.scrollIntoView({ block: 'start', behavior: RM.matches ? 'auto' : 'smooth' });
+  } catch (_) { elDetail.scrollIntoView(true); }
+}
+
 function flyToEvent(i) {
   const e = EV[i];
   if (!e) return;
@@ -3164,7 +3296,7 @@ function render(dt) {
   if (needRail) { drawRail(); needRail = false; }
   if (needPanel) {
     const F = q();
-    renderDetail(); renderThemes(); renderLens(); renderCatPin();
+    renderDetail(); renderThemes(); renderLens(); renderCatPin(); announce();
     document.getElementById('hdr-count').textContent = EV.length.toLocaleString();
     document.getElementById('hd-cov').textContent = S.kt;
     document.getElementById('hd-n').textContent = F.events.length.toLocaleString();

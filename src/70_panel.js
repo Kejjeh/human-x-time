@@ -47,6 +47,50 @@ function topK(items, k, better) {
 }
 const byCoverage = (a, b) => a.sl > b.sl;
 
+/* The panel is rebuilt only when the panel changes.
+ *
+ * renderDetail reassigned elDetail.innerHTML unconditionally, from the needPanel
+ * block, and needPanel is set by markAll() inside changed(), which setCoverage,
+ * setWindow, setSelection and every theme and lens change all call. So every
+ * pointermove of a rail drag destroyed and rebuilt the panel. Three things fell
+ * out of that, and they are the reason this is not a micro-optimisation:
+ *
+ *   - It broke the site's own headline interaction. The README sells scrubbing
+ *     the coverage floor with something selected - precisely the gesture that
+ *     threw the reader back to the top of the panel on every step.
+ *   - Focus died. The delegated click handler fires on a button whose subtree is
+ *     then replaced, so activeElement dropped to <body> and the keyboard user
+ *     lost their place on every hop.
+ *   - #detail was the aria-live region. Announcing ten kilobytes of panel per
+ *     pointer event is not an announcement, it is a denial of service.
+ *
+ * The comparison is against the rendered string itself rather than a signature
+ * over the state that feeds it. A signature has to be kept in step by hand with
+ * everything the template reads - the near list, the cluster members, the pinned
+ * category, the coverage counts - and the failure mode when it drifts is a panel
+ * that silently stops updating. The string cannot drift from itself. Building it
+ * is a few bounded top-k passes; what this skips is the innerHTML parse, the
+ * layout, the destroyed focus and the announcement. */
+let lastDetailHTML = null;
+
+function writeDetail(html) {
+  if (html === lastDetailHTML) return false;
+  lastDetailHTML = html;
+  /* Put the reader back where they were. Restoring by data-q rather than by
+     index: the list can be a different length after the rewrite, and landing on
+     whatever is now fourth is worse than landing nowhere. */
+  const act = document.activeElement;
+  const keep = act && elDetail.contains(act) ? act.getAttribute('data-q') : null;
+  const top = elDetail.scrollTop;
+  elDetail.innerHTML = html;
+  elDetail.scrollTop = top;
+  if (keep) {
+    const again = elDetail.querySelector(`[data-q="${CSS.escape(keep)}"]`);
+    if (again) again.focus();
+  }
+  return true;
+}
+
 function renderDetail() {
   const F = q();
   if (!S.selection || !BY_Q[S.selection]) {
@@ -55,7 +99,7 @@ function renderDetail() {
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
     const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
-    elDetail.innerHTML = `
+    writeDetail(`
       <div class="empty">
         <strong>Nothing selected</strong>
         Click a marker. Clusters split as you zoom the globe.
@@ -65,7 +109,7 @@ function renderDetail() {
         ${thin.length ? `<p style="margin-top:14px"><strong>In this window, but not on English Wikipedia</strong></p>
           <ol>${thin.map(e => `<li><button class="pick" data-q="${esc(e.q)}">${esc(e.n)}</button>
             <span class="num" style="color:var(--chalk-faint)"> ${fmtYear(e.y)} · ${e.sl} langs</span></li>`).join('')}</ol>` : ''}
-      </div>`;
+      </div>`);
     return;
   }
 
@@ -76,7 +120,7 @@ function renderDetail() {
   const near = topK(F.events, 7, (a, b) => Math.abs(a.y - e.y) < Math.abs(b.y - e.y))
     .filter(x => x.q !== e.q).slice(0, 6);
 
-  elDetail.innerHTML = `
+  writeDetail(`
     <div class="dt-head">
       <button class="tag" type="button" data-cat="${esc(e.c)}"
         aria-pressed="${S.cat === e.c}"
@@ -125,7 +169,25 @@ function renderDetail() {
       ${near.map(x => `<button class="pick" data-q="${esc(x.q)}">
         <span class="y num">${fmtYear(x.y)}</span>
         <span class="t">${esc(x.n)}</span></button>`).join('')}
-    </div>` : ''}`;
+    </div>` : ''}`);
+}
+
+/* One line, in its own live region, written only when it changes.
+   This is what #detail used to be, minus the ten kilobytes and minus the flood:
+   a rail drag moves this string only when the number in it actually moves. */
+let lastSay = null;
+function announce() {
+  const F = q();
+  const e = S.selection && BY_Q[S.selection];
+  const say = e
+    ? `${e.n}, ${fmtYear(e.y)}, ${e.sl === 0 ? 'no Wikipedia article'
+        : `carried by ${e.sl} language edition${e.sl === 1 ? '' : 's'}`}.`
+    : `${F.events.length.toLocaleString()} events shown${
+        S.cat ? `, ${CAT_LABEL[S.cat] || S.cat} only` : ''}.`;
+  if (say === lastSay) return;
+  lastSay = say;
+  const el = document.getElementById('say');
+  if (el) el.textContent = say;
 }
 
 /* The tooltip has always said "+7 more here" over a cluster. This is the part

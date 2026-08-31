@@ -75,7 +75,7 @@ depth slab first and colour second, because batching by colour alone puts one
 theme systematically on top of every overlap and tints the density map.
 
 `tools/smoke_test.py` loads the built page in headless Chromium and asks it, from
-outside, whether it works — 93 checks, run against both built documents and wired into the build as a gate. The sibling
+outside, whether it works — 104 checks, run against both built documents and wired into the build as a gate. The sibling
 site lost a whole build to a boot failure nothing detected, and this one had no
 `safeBoot` at all until now.
 
@@ -157,27 +157,24 @@ live query.
 - **One date per event.** Where a founding date is genuinely disputed, this shows
   whichever Wikidata records. The sibling site is the one built for disputes.
 - **A UX review found twelve, and two of those are about the sibling site.** Of
-  the ten that apply here, **five are closed**: a swipe scrolls the page instead
-  of flinging the globe to the pole, the stage overlays clear AA in light mode,
-  the keyboard reaches the time axis with both sliders announcing their value
-  in words rather than a bare number, a cluster now names what is inside it —
-  the panel lists the cell's members, in the same count the tooltip printed —
-  and the 62 Wikidata categories are a real axis, so "show me the other 1,204
-  cathedrals" is one click on the tag.
+  the ten that apply here, **eight are closed.** The phone build works: a swipe
+  scrolls the page instead of flinging the globe to the pole, a tap answers with
+  the tooltip and brings the panel into view, and the cluster cell follows the
+  pointer — 89% of marks were ambiguous under a finger at 390px, now 54%. The
+  stage overlays clear AA in light mode. The keyboard reaches the time axis and
+  both sliders announce their value in words. A cluster names what is inside it,
+  in the same count the tooltip printed. The 62 Wikidata categories are a real
+  axis, so "show me the other 1,204 cathedrals" is one click on the tag. A click
+  inside the panel opens whatever is hiding its target and flies there, instead
+  of bypassing the forty lines that do it. And the panel is rebuilt only when the
+  panel changes — scrubbing the coverage floor 81 steps with something selected
+  is 12 rewrites, not 81, and the announcement is one line in its own live region
+  rather than ten kilobytes of `#detail` per pointer event.
 
-  **Three are half-closed.** A tap on a marker now answers with the tooltip, but
-  the detail panel still does not scroll itself into view — it is the third grid
-  row on a narrow layout — and the cluster cell floor is still 15px whether the
-  globe is 128px across or 400. The 38,242-element sort is gone from the panel,
-  but the panel is still rebuilt whole on every state change, and `#detail` is
-  still `aria-live="polite"`, so a rail drag re-announces the entire thing on
-  every pointer event. And the language codes that carry an article are live
-  links now, on a page that still has no `description`, no `og:` tags and no
-  favicon.
+  **One is half-closed.** The language codes that carry an article are live links
+  now, on a page that still has no `description`, no `og:` tags and no favicon.
 
-  **Two are untouched.** A click inside the panel calls `setSelection` directly
-  and bypasses the forty lines that open whatever is hiding its target. And
-  there is no guided path.
+  **One is untouched.** There is no guided path.
 
   See [`docs/ux-review-2026-08-03.md`](docs/ux-review-2026-08-03.md), which covers
   this site and its sibling together.
