@@ -250,6 +250,12 @@ const S = {
   themes: new Set(THEMES),
   lens: '',                         // '' | 'only:<lang>' | 'not:<lang>'
   selection: null,
+  /* The other events under the mark that was clicked, or null.
+     Screen-space membership, so it is a snapshot of one click on one projection
+     rather than a property of the selection - see groupMembers in 45_markers.js
+     and dropGroup in 80_boot.js, which throws it away the moment the globe
+     moves under it. */
+  group: null,
   hover: null,
   showPlates: false,
   basemap: 'satellite',

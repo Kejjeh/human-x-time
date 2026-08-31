@@ -25,7 +25,7 @@ let PI = new Int32Array(0);
 /* ------------------------------------------------------- drawable groups */
 let GX = new Float32Array(0), GY = new Float32Array(0), GD = new Float32Array(0);
 let GI = new Int32Array(0), GN = new Uint32Array(0), GMIX = new Uint8Array(0);
-let GORD = new Int32Array(0);
+let GORD = new Int32Array(0), GK = new Int32Array(0);
 const BUCKET = new Int32Array(64);      // counting-sort offsets: 6 depth slabs x 6 themes + 1
 let NG = 0;
 
@@ -36,7 +36,7 @@ function grow(n) {
   PI = new Int32Array(k);
   GX = new Float32Array(k); GY = new Float32Array(k); GD = new Float32Array(k);
   GI = new Int32Array(k); GN = new Uint32Array(k); GMIX = new Uint8Array(k);
-  GORD = new Int32Array(k);
+  GORD = new Int32Array(k); GK = new Int32Array(k);
 }
 
 /* ---------------------------------------------------------------- clustering
@@ -55,11 +55,13 @@ function grow(n) {
 const BINS = new Map();
 let BC = new Uint32Array(0), BSX = new Float64Array(0), BSY = new Float64Array(0);
 let BI = new Int32Array(0), BD = new Float32Array(0), BT = new Int8Array(0);
+let BK = new Int32Array(0);
 function growBins(n) {
   if (BC.length >= n) return;
   const k = Math.max(1024, 1 << Math.ceil(Math.log2(n)));
   BC = new Uint32Array(k); BSX = new Float64Array(k); BSY = new Float64Array(k);
   BI = new Int32Array(k); BD = new Float32Array(k); BT = new Int8Array(k);
+  BK = new Int32Array(k);
 }
 
 function clusterInto(m, cell) {
@@ -80,7 +82,7 @@ function clusterInto(m, cell) {
     if (b === undefined) {
       b = g++;
       BINS.set(key, b);
-      BC[b] = 1; BSX[b] = PX[k]; BSY[b] = PY[k];
+      BC[b] = 1; BSX[b] = PX[k]; BSY[b] = PY[k]; BK[b] = key;
       BI[b] = i; BD[b] = PD[k]; BT[b] = th;
     } else {
       BC[b]++; BSX[b] += PX[k]; BSY[b] += PY[k];
@@ -94,8 +96,45 @@ function clusterInto(m, cell) {
     GX[b] = n === 1 ? BSX[b] : BSX[b] / n;
     GY[b] = n === 1 ? BSY[b] : BSY[b] / n;
     GI[b] = BI[b]; GD[b] = BD[b]; GMIX[b] = BT[b] < 0 ? 1 : 0;
+    GK[b] = BK[b];
   }
   return g;
+}
+
+/* ------------------------------------------------------ what else is in there
+   The tooltip has always said "+7 more here". The click resolved to one member
+   and threw the other seven away, so the mark made a promise nothing could keep
+   - and on a phone, where the tooltip only arrives on a tap, the visitor never
+   even learned the mark was plural.
+
+   Membership is recovered rather than stored. Keeping a list per cell would put
+   an array allocation back on the frame path, which is the one thing this file
+   exists to avoid; and the cells are rebuilt from scratch every frame anyway.
+   Instead the cell KEY is kept per group - one Int32 already being computed -
+   and membership is re-derived by one linear pass over the frame's projected
+   points, exactly once, when something is actually clicked.
+
+   PX/PY/PI are module-level scratch and survive the frame, so this must run
+   BEFORE anything repaints over them - see the call site in endGlobeDrag.
+
+   CELL is 0 when clustering is off, where every group is already a single
+   event and there is nothing to recover. */
+let PM = 0, CELL = 0;
+
+function groupMembers(k, limit) {
+  if (!CELL || k < 0 || k >= NG || GN[k] <= 1) return null;
+  const key = GK[k];
+  const ids = [];
+  for (let j = 0; j < PM; j++) {
+    if (Math.floor(PX[j] / CELL) * 4093 + Math.floor(PY[j] / CELL) !== key) continue;
+    ids.push(PI[j]);
+  }
+  if (ids.length < 2) return null;
+  /* Best-covered first, which is also the rule that picked the label and the
+     click target - so the event the mark already stands for heads its own list
+     instead of turning up somewhere in the middle of it. */
+  ids.sort((a, b) => EVSL[b] - EVSL[a]);
+  return { total: ids.length, ids: ids.slice(0, limit) };
 }
 
 /* --------------------------------------------------------------- hit testing
@@ -103,7 +142,7 @@ function clusterInto(m, cell) {
    box rejection before the hypot is not premature - it is the difference
    between 0.1 ms and 2 ms on a corpus this size. */
 let HX = new Float32Array(0), HY = new Float32Array(0), HR = new Float32Array(0);
-let HI = new Int32Array(0), HC = new Uint32Array(0);
+let HI = new Int32Array(0), HC = new Uint32Array(0), HK = new Int32Array(0);
 let HN = 0;
 
 /* Frontmost wins, not nearest.
@@ -120,7 +159,7 @@ function hitTest(mx, my) {
     const dx = HX[k] - mx; if (dx > r || dx < -r) continue;
     const dy = HY[k] - my; if (dy > r || dy < -r) continue;
     if (dx * dx + dy * dy >= r * r) continue;
-    return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k] };
+    return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k], g: HK[k] };
   }
   return null;
 }
@@ -132,7 +171,7 @@ function drawEvents() {
   if (HX.length < PX.length) {
     HX = new Float32Array(PX.length); HY = new Float32Array(PX.length);
     HR = new Float32Array(PX.length); HI = new Int32Array(PX.length);
-    HC = new Uint32Array(PX.length);
+    HC = new Uint32Array(PX.length); HK = new Int32Array(PX.length);
   }
 
   const m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4],
@@ -150,9 +189,12 @@ function drawEvents() {
     m++;
   }
 
+  PM = m;
   if (S.cluster) {
-    NG = clusterInto(m, Math.max(15, GR * 0.055));
+    CELL = Math.max(15, GR * 0.055);
+    NG = clusterInto(m, CELL);
   } else {
+    CELL = 0;
     NG = m;
     for (let k = 0; k < m; k++) {
       GX[k] = PX[k]; GY[k] = PY[k]; GD[k] = PD[k]; GI[k] = PI[k];
@@ -224,7 +266,7 @@ function drawEvents() {
     for (let k = 0; k < NG; k++) {
       HX[HN] = GX[k]; HY[HN] = GY[k];
       HR[HN] = markerRadius(GN[k], EVSL[GI[k]]) + 6;
-      HI[HN] = GI[k]; HC[HN] = GN[k]; HN++;
+      HI[HN] = GI[k]; HC[HN] = GN[k]; HK[HN] = k; HN++;
     }
     const sel = S.selection && BY_Q[S.selection];
     if (sel) {
@@ -270,7 +312,7 @@ function drawEvents() {
       gx.strokeStyle = CSSV.chalk; gx.lineWidth = 1.3; gx.stroke();
     }
 
-    HX[HN] = sx; HY[HN] = sy; HR[HN] = r + 6; HI[HN] = i; HC[HN] = n; HN++;
+    HX[HN] = sx; HY[HN] = sy; HR[HN] = r + 6; HI[HN] = i; HC[HN] = n; HK[HN] = k; HN++;
   }
   }
 

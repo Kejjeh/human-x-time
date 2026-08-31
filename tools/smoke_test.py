@@ -410,6 +410,95 @@ def run(url, headed, report):
                          front["ok"] == front["tested"],
                          f"{front['ok']}/{front['tested']} overlapping pairs")
 
+        # The tooltip says "+94 more here" and the click used to resolve to one
+        # member and drop the rest. These check that the promise is now kept and
+        # that it is kept ACCURATELY: the panel's total has to be the same number
+        # the tooltip printed, and the members have to be the cell's own.
+        #
+        # The count is verified twice, on purpose. Once against GN, which is what
+        # the tooltip reads. Once against a recount that compares the two cell
+        # indices as a PAIR rather than through the packed `*4093 + y` key that
+        # groupMembers uses - so a key collision between two distant cells, the
+        # one failure mode the packing can have, shows up as a disagreement
+        # instead of as two clusters quietly merged.
+        # A known view, because the checks above leave the lens, the floor and
+        # the window wherever they finished - and with those pinned somewhere
+        # narrow there is no cluster on screen to open at all.
+        page.evaluate("S.lens=''; S.kt=40; S.themes=new Set(THEMES); S.cluster=true;"
+                      " S.win.t0=0; S.win.t1=3200; S.rot.lam=-10; S.rot.phi=25;"
+                      " ZOOMF=0.86; applyZoom(); syncControls(); changed(); renderNow();")
+        page.wait_for_timeout(250)
+        big = page.evaluate("""() => {
+          let k = -1, n = 0;
+          for (let j = 0; j < NG; j++)
+            if (GN[j] > n && GX[j] > 90 && GY[j] > 90 && GX[j] < GW - 90 && GY[j] < GH - 90)
+              { n = GN[j]; k = j; }
+          return k < 0 ? null : { k, n, x: GX[k], y: GY[k] };
+        }""")
+        if report.check("the globe has a cluster to open", bool(big) and big["n"] > 3,
+                        f"largest on-screen cluster holds {big['n'] if big else 0}"):
+            page.mouse.click(box["x"] + big["x"], box["y"] + big["y"])
+            page.wait_for_timeout(250)
+            grp = page.evaluate("""() => {
+              if (!S.group) return null;
+              const sel = BY_Q[S.selection];
+              /* the clicked cell, addressed as a pair of indices rather than
+                 through the packed key */
+              let cx = 0, cy = 0, found = false;
+              for (let j = 0; j < PM; j++) if (PI[j] === sel.i) {
+                cx = Math.floor(PX[j] / CELL); cy = Math.floor(PY[j] / CELL); found = true; break;
+              }
+              let recount = 0;
+              if (found) for (let j = 0; j < PM; j++)
+                if (Math.floor(PX[j] / CELL) === cx && Math.floor(PY[j] / CELL) === cy) recount++;
+              const at = new Map();
+              for (let j = 0; j < PM; j++) at.set(PI[j], j);
+              let tipN = 0, mx = 0, my = 0;
+              for (let j = 0; j < NG; j++) if (GI[j] === sel.i) { tipN = GN[j]; mx = GX[j]; my = GY[j]; break; }
+              /* how far each listed member actually is from the mark it is filed under */
+              let worst = 0;
+              for (const i of S.group.ids) {
+                const j = at.get(i);
+                if (j === undefined) { worst = 1e9; break; }
+                worst = Math.max(worst, Math.abs(PX[j] - mx), Math.abs(PY[j] - my));
+              }
+              return { found, total: S.group.total, recount, tipN, worst, cell: CELL,
+                       listed: document.querySelectorAll('#detail [data-here]').length,
+                       ids: S.group.ids.length,
+                       uniq: new Set(S.group.ids).size,
+                       hasSelf: S.group.ids.includes(sel.i) };
+            }""")
+            if report.check("clicking a cluster recovers what is in it", grp is not None,
+                            "S.group was not set"):
+                report.check("the panel lists the cell the tooltip counted",
+                             grp["total"] == grp["tipN"],
+                             f"panel {grp['total']}, tooltip +{grp['tipN'] - 1} more")
+                report.check("cluster membership survives the packed cell key",
+                             grp["found"] and grp["total"] == grp["recount"],
+                             f"{grp['total']} by key, {grp['recount']} by index pair")
+                report.check("every listed member really is under that mark",
+                             grp["worst"] <= grp["cell"],
+                             f"furthest {grp['worst']:.1f}px, cell {grp['cell']:.1f}px")
+                report.check("the list names each member once, and includes the mark itself",
+                             grp["uniq"] == grp["ids"] and grp["hasSelf"],
+                             f"{grp['uniq']} of {grp['ids']} distinct, self listed={grp['hasSelf']}")
+                report.check("every member but the selected one is offered as a link",
+                             grp["listed"] == grp["ids"] - 1,
+                             f"{grp['listed']} links for {grp['ids']} members")
+                # Screen-space membership describes ONE projection. Rotating
+                # invalidates it, and rotation deliberately does not repaint the
+                # panel - so the list has to be dropped rather than left standing
+                # as a claim about a view that is no longer on screen.
+                page.focus("#globe")
+                page.keyboard.press("ArrowRight")
+                page.wait_for_timeout(200)
+                report.check("turning the globe drops the membership list",
+                             page.evaluate("S.group") is None and
+                             page.evaluate("document.querySelectorAll('#detail [data-here]').length") == 0,
+                             f"S.group={page.evaluate('S.group')!r}")
+            page.evaluate("setSelection(null)")
+            page.wait_for_timeout(120)
+
         # pointerdown fires for every button, so a right-click used to be a
         # gesture: on the rail it set the coverage floor, measured jumping from
         # 40 to 3 while the context menu opened over the top.

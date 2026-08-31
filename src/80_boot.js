@@ -3,7 +3,22 @@
    ========================================================================== */
 let needGlobe = true, needChron = true, needRail = true, needPanel = true;
 function markAll() { needGlobe = needChron = needRail = needPanel = true; }
-function changed() { invalidate(); markAll(); paintOnInput(); writeHash(); }
+function changed(keepGroup) {
+  if (!keepGroup) S.group = null;
+  invalidate(); markAll(); paintOnInput(); writeHash();
+}
+
+/* The cluster membership list is a claim about where things are ON SCREEN, and
+   the globe can move without any of the state that changed() watches moving
+   with it: rotation and zoom set needGlobe alone, by design, because rebuilding
+   the panel sixty times through a drag is the cost this codebase keeps buying
+   back. So the list is dropped the first time the projection it was measured in
+   stops being the one on screen. Guarded on S.group, so this repaints the panel
+   once at the start of a drag and never again for its duration. */
+function dropGroup() {
+  if (!S.group) return;
+  S.group = null; needPanel = true;
+}
 
 function setCoverage(n) {
   // Zero is a real floor - see the note in 60_rail.js. It is the only one that
@@ -41,7 +56,15 @@ function setWindow(t0, t1) {
   if (b > T_MAX) { b = T_MAX; a = T_MAX - span; }
   S.win.t0 = a; S.win.t1 = b; changed();
 }
-function setSelection(qid) { S.selection = qid; changed(); }
+/* `group` is what else was under the mark, when the selection came from a click
+   on the globe. Every other route - search, a panel link, Escape - passes
+   nothing and the list is cleared, which is right: those selections are not a
+   statement about a cluster. */
+function setSelection(qid, group) {
+  S.selection = qid;
+  S.group = group || null;
+  changed(true);
+}
 
 /* -------------------------------------------------------------------- globe */
 let gDrag = null, gMoved = 0;
@@ -54,6 +77,7 @@ function setZoom(z) {
   const n = Math.max(ZMIN, Math.min(ZMAX, z));
   if (n === ZOOMF) return false;
   ZOOMF = n; applyZoom(); needGlobe = true;
+  dropGroup();                 // the cells resize with the disc; see dropGroup
   return true;
 }
 
@@ -143,6 +167,7 @@ gcv.addEventListener('pointermove', e => {
     }
     if (gDrag.pan === false) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
     const k = 180 / (GR * Math.PI) * 1.1;
+    dropGroup();
     S.rot.lam += dx * k;
     S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + dy * k));
     gVel.push({ dx, dy, t: performance.now() });
@@ -205,7 +230,11 @@ function showTip(best) {
   if (best.id === tipFor && best.n === tipN &&
       best.x === tipAtX && best.y === tipAtY && tip.classList.contains('on')) return;
   tipFor = best.id; tipN = best.n; tipAtX = best.x; tipAtY = best.y;
-  tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
+  /* The category is decoded for every event and, until now, shown in exactly one
+     place. It is the cheapest sentence on the mark: "Cathedral, 1163" says what
+     the dot is before the panel has to. */
+  tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${
+    esc(CAT_LABEL[ev.c] || '')} ${fmtYear(ev.y)} · ${ev.sl} langs${
     best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
   positionTip(tip, best.x, best.y);
   tip.classList.add('on');
@@ -226,7 +255,10 @@ function endGlobeDrag(e) {
   if (gMoved < 5) {
     const rect = gcv.getBoundingClientRect();
     const best = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-    setSelection(best ? best.id : null);
+    /* Taken here, before setSelection: that repaints, and the repaint overwrites
+       the very scratch arrays membership is recovered from. */
+    const group = best ? groupMembers(best.g, 12) : null;
+    setSelection(best ? best.id : null, group);
     /* A tap on a marker used to show nothing at all. The tooltip is driven by
        hover, which a finger never produces, and the detail panel is the third
        grid row on a narrow layout - measured at y=1011 in an 855px viewport,
@@ -300,6 +332,8 @@ gcv.addEventListener('wheel', e => {
 }, { passive: false });
 gcv.addEventListener('keydown', e => {
   const step = e.shiftKey ? 15 : 5;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+      e.key === 'ArrowUp' || e.key === 'ArrowDown') dropGroup();
   if (e.key === 'ArrowLeft') S.rot.lam -= step;
   else if (e.key === 'ArrowRight') S.rot.lam += step;
   else if (e.key === 'ArrowUp') S.rot.phi = Math.min(89, S.rot.phi + step);
@@ -441,11 +475,16 @@ document.getElementById('themes').addEventListener('click', e => {
 document.getElementById('lens').addEventListener('change', e => { S.lens = e.target.value; changed(); });
 elDetail.addEventListener('click', e => {
   const b = e.target.closest('[data-q]'); if (!b) return;
-  setSelection(b.dataset.q); elDetail.scrollTop = 0;
+  /* A link in the "also at this mark" list is the one panel link that must not
+     drop the list it came out of - every one of its targets is inside the same
+     cell, so the membership it describes is still exactly true. */
+  setSelection(b.dataset.q, b.dataset.here ? S.group : null);
+  elDetail.scrollTop = 0;
 });
 document.getElementById('btn-cluster').addEventListener('click', e => {
   S.cluster = !S.cluster;
   e.currentTarget.setAttribute('aria-pressed', String(S.cluster));
+  dropGroup();                 // there are no cells to be a member of any more
   needGlobe = true; paintOnInput();
 });
 document.getElementById('btn-basemap').addEventListener('click', e => {
@@ -781,7 +820,10 @@ function safeBoot() {
     startHeartbeat();
   }
 }
-const ro = new ResizeObserver(() => { resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow(); });
+const ro = new ResizeObserver(() => {
+  S.group = null;              // measured in a projection this size, and it is not
+  resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow();
+});
 ro.observe(document.getElementById('stage'));
 ro.observe(document.querySelector('.chron'));
 ro.observe(document.querySelector('.rail'));

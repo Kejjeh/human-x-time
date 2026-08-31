@@ -245,6 +245,10 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .nearby button:hover { background:var(--panel-3); }
 .nearby .y { font-family:var(--font-data); font-size:10.5px; color:var(--chalk-faint); flex:none; width:52px; }
 .nearby .t { font-size:11.5px; color:var(--chalk); }
+/* The coverage count on an "also at this mark" row. margin-left:auto rather than
+   flex:1 on .t, so it does not change how the shared .t rule wraps in the
+   "Nearest in time" list above it. */
+.nearby .c { margin-left:auto; padding-left:8px; flex:none; font-size:10px; color:var(--chalk-faint); }
 
 /* ================================================================== STAGE */
 /* Inset, because the ring would otherwise be invisible. :focus-visible paints
@@ -699,6 +703,12 @@ const S = {
   themes: new Set(THEMES),
   lens: '',                         // '' | 'only:<lang>' | 'not:<lang>'
   selection: null,
+  /* The other events under the mark that was clicked, or null.
+     Screen-space membership, so it is a snapshot of one click on one projection
+     rather than a property of the selection - see groupMembers in 45_markers.js
+     and dropGroup in 80_boot.js, which throws it away the moment the globe
+     moves under it. */
+  group: null,
   hover: null,
   showPlates: false,
   basemap: 'satellite',
@@ -1309,7 +1319,7 @@ let PI = new Int32Array(0);
 /* ------------------------------------------------------- drawable groups */
 let GX = new Float32Array(0), GY = new Float32Array(0), GD = new Float32Array(0);
 let GI = new Int32Array(0), GN = new Uint32Array(0), GMIX = new Uint8Array(0);
-let GORD = new Int32Array(0);
+let GORD = new Int32Array(0), GK = new Int32Array(0);
 const BUCKET = new Int32Array(64);      // counting-sort offsets: 6 depth slabs x 6 themes + 1
 let NG = 0;
 
@@ -1320,7 +1330,7 @@ function grow(n) {
   PI = new Int32Array(k);
   GX = new Float32Array(k); GY = new Float32Array(k); GD = new Float32Array(k);
   GI = new Int32Array(k); GN = new Uint32Array(k); GMIX = new Uint8Array(k);
-  GORD = new Int32Array(k);
+  GORD = new Int32Array(k); GK = new Int32Array(k);
 }
 
 /* ---------------------------------------------------------------- clustering
@@ -1339,11 +1349,13 @@ function grow(n) {
 const BINS = new Map();
 let BC = new Uint32Array(0), BSX = new Float64Array(0), BSY = new Float64Array(0);
 let BI = new Int32Array(0), BD = new Float32Array(0), BT = new Int8Array(0);
+let BK = new Int32Array(0);
 function growBins(n) {
   if (BC.length >= n) return;
   const k = Math.max(1024, 1 << Math.ceil(Math.log2(n)));
   BC = new Uint32Array(k); BSX = new Float64Array(k); BSY = new Float64Array(k);
   BI = new Int32Array(k); BD = new Float32Array(k); BT = new Int8Array(k);
+  BK = new Int32Array(k);
 }
 
 function clusterInto(m, cell) {
@@ -1364,7 +1376,7 @@ function clusterInto(m, cell) {
     if (b === undefined) {
       b = g++;
       BINS.set(key, b);
-      BC[b] = 1; BSX[b] = PX[k]; BSY[b] = PY[k];
+      BC[b] = 1; BSX[b] = PX[k]; BSY[b] = PY[k]; BK[b] = key;
       BI[b] = i; BD[b] = PD[k]; BT[b] = th;
     } else {
       BC[b]++; BSX[b] += PX[k]; BSY[b] += PY[k];
@@ -1378,8 +1390,45 @@ function clusterInto(m, cell) {
     GX[b] = n === 1 ? BSX[b] : BSX[b] / n;
     GY[b] = n === 1 ? BSY[b] : BSY[b] / n;
     GI[b] = BI[b]; GD[b] = BD[b]; GMIX[b] = BT[b] < 0 ? 1 : 0;
+    GK[b] = BK[b];
   }
   return g;
+}
+
+/* ------------------------------------------------------ what else is in there
+   The tooltip has always said "+7 more here". The click resolved to one member
+   and threw the other seven away, so the mark made a promise nothing could keep
+   - and on a phone, where the tooltip only arrives on a tap, the visitor never
+   even learned the mark was plural.
+
+   Membership is recovered rather than stored. Keeping a list per cell would put
+   an array allocation back on the frame path, which is the one thing this file
+   exists to avoid; and the cells are rebuilt from scratch every frame anyway.
+   Instead the cell KEY is kept per group - one Int32 already being computed -
+   and membership is re-derived by one linear pass over the frame's projected
+   points, exactly once, when something is actually clicked.
+
+   PX/PY/PI are module-level scratch and survive the frame, so this must run
+   BEFORE anything repaints over them - see the call site in endGlobeDrag.
+
+   CELL is 0 when clustering is off, where every group is already a single
+   event and there is nothing to recover. */
+let PM = 0, CELL = 0;
+
+function groupMembers(k, limit) {
+  if (!CELL || k < 0 || k >= NG || GN[k] <= 1) return null;
+  const key = GK[k];
+  const ids = [];
+  for (let j = 0; j < PM; j++) {
+    if (Math.floor(PX[j] / CELL) * 4093 + Math.floor(PY[j] / CELL) !== key) continue;
+    ids.push(PI[j]);
+  }
+  if (ids.length < 2) return null;
+  /* Best-covered first, which is also the rule that picked the label and the
+     click target - so the event the mark already stands for heads its own list
+     instead of turning up somewhere in the middle of it. */
+  ids.sort((a, b) => EVSL[b] - EVSL[a]);
+  return { total: ids.length, ids: ids.slice(0, limit) };
 }
 
 /* --------------------------------------------------------------- hit testing
@@ -1387,7 +1436,7 @@ function clusterInto(m, cell) {
    box rejection before the hypot is not premature - it is the difference
    between 0.1 ms and 2 ms on a corpus this size. */
 let HX = new Float32Array(0), HY = new Float32Array(0), HR = new Float32Array(0);
-let HI = new Int32Array(0), HC = new Uint32Array(0);
+let HI = new Int32Array(0), HC = new Uint32Array(0), HK = new Int32Array(0);
 let HN = 0;
 
 /* Frontmost wins, not nearest.
@@ -1404,7 +1453,7 @@ function hitTest(mx, my) {
     const dx = HX[k] - mx; if (dx > r || dx < -r) continue;
     const dy = HY[k] - my; if (dy > r || dy < -r) continue;
     if (dx * dx + dy * dy >= r * r) continue;
-    return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k] };
+    return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k], g: HK[k] };
   }
   return null;
 }
@@ -1416,7 +1465,7 @@ function drawEvents() {
   if (HX.length < PX.length) {
     HX = new Float32Array(PX.length); HY = new Float32Array(PX.length);
     HR = new Float32Array(PX.length); HI = new Int32Array(PX.length);
-    HC = new Uint32Array(PX.length);
+    HC = new Uint32Array(PX.length); HK = new Int32Array(PX.length);
   }
 
   const m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4],
@@ -1434,9 +1483,12 @@ function drawEvents() {
     m++;
   }
 
+  PM = m;
   if (S.cluster) {
-    NG = clusterInto(m, Math.max(15, GR * 0.055));
+    CELL = Math.max(15, GR * 0.055);
+    NG = clusterInto(m, CELL);
   } else {
+    CELL = 0;
     NG = m;
     for (let k = 0; k < m; k++) {
       GX[k] = PX[k]; GY[k] = PY[k]; GD[k] = PD[k]; GI[k] = PI[k];
@@ -1508,7 +1560,7 @@ function drawEvents() {
     for (let k = 0; k < NG; k++) {
       HX[HN] = GX[k]; HY[HN] = GY[k];
       HR[HN] = markerRadius(GN[k], EVSL[GI[k]]) + 6;
-      HI[HN] = GI[k]; HC[HN] = GN[k]; HN++;
+      HI[HN] = GI[k]; HC[HN] = GN[k]; HK[HN] = k; HN++;
     }
     const sel = S.selection && BY_Q[S.selection];
     if (sel) {
@@ -1554,7 +1606,7 @@ function drawEvents() {
       gx.strokeStyle = CSSV.chalk; gx.lineWidth = 1.3; gx.stroke();
     }
 
-    HX[HN] = sx; HY[HN] = sy; HR[HN] = r + 6; HI[HN] = i; HC[HN] = n; HN++;
+    HX[HN] = sx; HY[HN] = sy; HR[HN] = r + 6; HI[HN] = i; HC[HN] = n; HK[HN] = k; HN++;
   }
   }
 
@@ -2012,12 +2064,42 @@ function renderDetail() {
         radiometric date it would not be, which is why the sibling site works differently.</p>
     </div>
 
+    ${alsoHere(e)}
+
     ${near.length ? `<div class="sect nearby">
       <span class="lbl">Nearest in time</span>
       ${near.map(x => `<button class="pick" data-q="${esc(x.q)}">
         <span class="y num">${fmtYear(x.y)}</span>
         <span class="t">${esc(x.n)}</span></button>`).join('')}
     </div>` : ''}`;
+}
+
+/* The tooltip has always said "+7 more here" over a cluster. This is the part
+   that keeps the promise: the rest of the cell, named, in one click each.
+
+   S.group is a snapshot taken at the moment of the click, in the projection that
+   was on screen then - so it is dropped as soon as the globe moves (dropGroup in
+   80_boot.js) rather than left to describe a view from three drags ago. The
+   caption says "cluster cell" rather than "place" on purpose: these events are
+   near each other ON SCREEN at this zoom, which is not the same claim as being
+   near each other on the ground, and at low zoom the difference is hundreds of
+   kilometres. */
+function alsoHere(sel) {
+  const g = S.group;
+  if (!g || g.total < 2) return '';
+  const rest = g.ids.map(i => EV[i]).filter(x => x && x.q !== sel.q);
+  if (!rest.length) return '';
+  const shown = rest.length + 1;                 // the selected one is in the cell too
+  return `<div class="sect nearby">
+      <span class="lbl">Also at this mark</span>
+      <p class="hint" style="margin:-4px 0 8px">${g.total.toLocaleString()} events share this
+        cluster cell${g.total > shown ? `; the ${shown} most widely remembered are listed` : ''}.
+        Zoom the globe to split it.</p>
+      ${rest.map(x => `<button class="pick" data-q="${esc(x.q)}" data-here="1">
+        <span class="y num">${fmtYear(x.y)}</span>
+        <span class="t">${esc(x.n)}</span>
+        <span class="c num">${x.sl}</span></button>`).join('')}
+    </div>`;
 }
 
 function renderThemes() {
@@ -2386,7 +2468,22 @@ window.addEventListener('hashchange', () => {
    ========================================================================== */
 let needGlobe = true, needChron = true, needRail = true, needPanel = true;
 function markAll() { needGlobe = needChron = needRail = needPanel = true; }
-function changed() { invalidate(); markAll(); paintOnInput(); writeHash(); }
+function changed(keepGroup) {
+  if (!keepGroup) S.group = null;
+  invalidate(); markAll(); paintOnInput(); writeHash();
+}
+
+/* The cluster membership list is a claim about where things are ON SCREEN, and
+   the globe can move without any of the state that changed() watches moving
+   with it: rotation and zoom set needGlobe alone, by design, because rebuilding
+   the panel sixty times through a drag is the cost this codebase keeps buying
+   back. So the list is dropped the first time the projection it was measured in
+   stops being the one on screen. Guarded on S.group, so this repaints the panel
+   once at the start of a drag and never again for its duration. */
+function dropGroup() {
+  if (!S.group) return;
+  S.group = null; needPanel = true;
+}
 
 function setCoverage(n) {
   // Zero is a real floor - see the note in 60_rail.js. It is the only one that
@@ -2424,7 +2521,15 @@ function setWindow(t0, t1) {
   if (b > T_MAX) { b = T_MAX; a = T_MAX - span; }
   S.win.t0 = a; S.win.t1 = b; changed();
 }
-function setSelection(qid) { S.selection = qid; changed(); }
+/* `group` is what else was under the mark, when the selection came from a click
+   on the globe. Every other route - search, a panel link, Escape - passes
+   nothing and the list is cleared, which is right: those selections are not a
+   statement about a cluster. */
+function setSelection(qid, group) {
+  S.selection = qid;
+  S.group = group || null;
+  changed(true);
+}
 
 /* -------------------------------------------------------------------- globe */
 let gDrag = null, gMoved = 0;
@@ -2437,6 +2542,7 @@ function setZoom(z) {
   const n = Math.max(ZMIN, Math.min(ZMAX, z));
   if (n === ZOOMF) return false;
   ZOOMF = n; applyZoom(); needGlobe = true;
+  dropGroup();                 // the cells resize with the disc; see dropGroup
   return true;
 }
 
@@ -2526,6 +2632,7 @@ gcv.addEventListener('pointermove', e => {
     }
     if (gDrag.pan === false) { gDrag.x = e.clientX; gDrag.y = e.clientY; return; }
     const k = 180 / (GR * Math.PI) * 1.1;
+    dropGroup();
     S.rot.lam += dx * k;
     S.rot.phi = Math.max(-89, Math.min(89, S.rot.phi + dy * k));
     gVel.push({ dx, dy, t: performance.now() });
@@ -2588,7 +2695,11 @@ function showTip(best) {
   if (best.id === tipFor && best.n === tipN &&
       best.x === tipAtX && best.y === tipAtY && tip.classList.contains('on')) return;
   tipFor = best.id; tipN = best.n; tipAtX = best.x; tipAtY = best.y;
-  tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${fmtYear(ev.y)} · ${ev.sl} langs${
+  /* The category is decoded for every event and, until now, shown in exactly one
+     place. It is the cheapest sentence on the mark: "Cathedral, 1163" says what
+     the dot is before the panel has to. */
+  tip.innerHTML = `<span class="t">${esc(ev.n)}</span><span class="d">${
+    esc(CAT_LABEL[ev.c] || '')} ${fmtYear(ev.y)} · ${ev.sl} langs${
     best.n > 1 ? ` · +${best.n - 1} more here` : ''}</span>`;
   positionTip(tip, best.x, best.y);
   tip.classList.add('on');
@@ -2609,7 +2720,10 @@ function endGlobeDrag(e) {
   if (gMoved < 5) {
     const rect = gcv.getBoundingClientRect();
     const best = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-    setSelection(best ? best.id : null);
+    /* Taken here, before setSelection: that repaints, and the repaint overwrites
+       the very scratch arrays membership is recovered from. */
+    const group = best ? groupMembers(best.g, 12) : null;
+    setSelection(best ? best.id : null, group);
     /* A tap on a marker used to show nothing at all. The tooltip is driven by
        hover, which a finger never produces, and the detail panel is the third
        grid row on a narrow layout - measured at y=1011 in an 855px viewport,
@@ -2683,6 +2797,8 @@ gcv.addEventListener('wheel', e => {
 }, { passive: false });
 gcv.addEventListener('keydown', e => {
   const step = e.shiftKey ? 15 : 5;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+      e.key === 'ArrowUp' || e.key === 'ArrowDown') dropGroup();
   if (e.key === 'ArrowLeft') S.rot.lam -= step;
   else if (e.key === 'ArrowRight') S.rot.lam += step;
   else if (e.key === 'ArrowUp') S.rot.phi = Math.min(89, S.rot.phi + step);
@@ -2824,11 +2940,16 @@ document.getElementById('themes').addEventListener('click', e => {
 document.getElementById('lens').addEventListener('change', e => { S.lens = e.target.value; changed(); });
 elDetail.addEventListener('click', e => {
   const b = e.target.closest('[data-q]'); if (!b) return;
-  setSelection(b.dataset.q); elDetail.scrollTop = 0;
+  /* A link in the "also at this mark" list is the one panel link that must not
+     drop the list it came out of - every one of its targets is inside the same
+     cell, so the membership it describes is still exactly true. */
+  setSelection(b.dataset.q, b.dataset.here ? S.group : null);
+  elDetail.scrollTop = 0;
 });
 document.getElementById('btn-cluster').addEventListener('click', e => {
   S.cluster = !S.cluster;
   e.currentTarget.setAttribute('aria-pressed', String(S.cluster));
+  dropGroup();                 // there are no cells to be a member of any more
   needGlobe = true; paintOnInput();
 });
 document.getElementById('btn-basemap').addEventListener('click', e => {
@@ -3164,7 +3285,10 @@ function safeBoot() {
     startHeartbeat();
   }
 }
-const ro = new ResizeObserver(() => { resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow(); });
+const ro = new ResizeObserver(() => {
+  S.group = null;              // measured in a projection this size, and it is not
+  resizeGlobe(); resizeChron(); resizeRail(); markAll(); renderNow();
+});
 ro.observe(document.getElementById('stage'));
 ro.observe(document.querySelector('.chron'));
 ro.observe(document.querySelector('.rail'));
