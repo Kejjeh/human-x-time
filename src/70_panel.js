@@ -98,7 +98,12 @@ function renderDetail() {
     // Ranked, not sliced raw: the corpus arrives in year order now, so an
     // unsorted slice would quietly become "the five oldest" instead of "the
     // five best-covered that English has no article for".
-    const thin = topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
+    /* ...and only when it says something the list above does not. Under the
+       lens "Missing from en.wikipedia" every visible event is already one with
+       no English article, so this rendered the same six names twice under two
+       different headings, which reads as a fault rather than as a finding. */
+    const thin = S.lens === 'not:en' ? []
+      : topK(F.events.filter(e => !(e.m & LANG_BIT.en)), 5, byCoverage);
     writeDetail(`
       <div class="empty">
         <strong>Nothing selected</strong>

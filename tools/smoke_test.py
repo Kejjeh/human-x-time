@@ -321,6 +321,52 @@ def run(url, headed, report):
         }""")
         report.check("choosing a result outside the pinned category unpins it", unpin)
 
+        # Each tally counts everything except its own axis. With a category
+        # pinned the theme chips read 262 Conflict and 266 Politics beside a
+        # globe showing 227 of anything, and clicking Politics did not give 266.
+        axes = page.evaluate("""() => {
+          const st = { cat: S.cat, kt: S.kt, w: { ...S.win }, th: new Set(S.themes) };
+          S.kt = 40; S.win = { t0: 0, t1: 3200 }; S.themes = new Set(THEMES);
+          S.cat = 'capital'; invalidate();
+          let F = q();
+          const promised = F.themeCounts.polity;
+          /* what clicking that chip actually gives you */
+          S.themes = new Set(['polity']); invalidate();
+          const delivered = q().n;
+          S.themes = new Set(THEMES); S.cat = st.cat; S.kt = st.kt; S.win = st.w;
+          S.themes = st.th; invalidate();
+          return { promised, delivered };
+        }""")
+        report.check("a theme count is what clicking that chip would give you",
+                     axes["promised"] == axes["delivered"] and axes["delivered"] > 0,
+                     f"the chip promised {axes['promised']}, clicking it gave {axes['delivered']}")
+
+        # Under "Missing from en.wikipedia" every visible event already has no
+        # English article, so the empty panel printed the same six names twice
+        # under two different headings.
+        dup = page.evaluate("""() => {
+          S.kt = 1; S.lens = 'not:en'; S.cat = ''; S.themes = new Set(THEMES);
+          S.win = { t0: 0, t1: 3200 }; setSelection(null); syncControls(); changed(); renderNow();
+          const heads = [...document.querySelectorAll('#detail .empty strong')]
+            .map(e => e.textContent.trim());
+          const lists = [...document.querySelectorAll('#detail .empty ol')]
+            .map(o => [...o.querySelectorAll('[data-q]')].map(b => b.dataset.q).join(','));
+          S.lens = ''; syncControls(); changed(); renderNow();
+          const after = [...document.querySelectorAll('#detail .empty ol')].length;
+          return { heads, lists, after };
+        }""")
+        # Not string equality: the two lists are a top-6 and a top-5, so under
+        # the lens they differ by exactly one row and still say nothing new. The
+        # test is containment.
+        sets = [set(l.split(",")) for l in dup["lists"] if l]
+        redundant = len(sets) > 1 and any(
+            a <= b or b <= a for a, b in zip(sets, sets[1:]))
+        report.check("the empty panel never prints one list inside another",
+                     not redundant and dup["after"] == 2,
+                     f"{len(dup['lists'])} list(s) under the lens"
+                     + (" and the second is a subset of the first" if redundant else "")
+                     + f", {dup['after']} without it")
+
         # ------------------------------------- the panel, and who it announces to
         #
         # renderDetail reassigned innerHTML unconditionally from the needPanel
