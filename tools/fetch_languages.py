@@ -42,11 +42,53 @@ SITEMATRIX = (API + "?action=sitematrix&format=json&formatversion=2"
                     "&smtype=language&smlangprop=code|site")
 
 
+def get(url, tries=6):
+    """One API call, retried with backoff.
+
+    Wikidata answers 429 freely to a shared egress address, and this crawl is
+    765 calls: without a retry the failures are not rare, they are routine. A
+    429 is slept on for longer than a connection error, because it is the API
+    asking for exactly that.
+
+    Measured on the run this was written for: 148 of 765 batches gave up under
+    the old four-try schedule, leaving 7,400 events - 19% of the corpus -
+    unresolved."""
+    last = None
+    for i in range(tries):
+        try:
+            with urllib.request.urlopen(
+                    urllib.request.Request(url, headers=UA), timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as err:                  # noqa: PERF203
+            last = err
+            wait = 0
+            if err.code == 429:
+                try:
+                    wait = int(err.headers.get("Retry-After") or 0)
+                except ValueError:
+                    wait = 0
+                wait = max(wait, 5 * (i + 1))
+            else:
+                wait = 2 * (i + 1)
+            if i < tries - 1:
+                time.sleep(wait)
+        except Exception as err:                               # noqa: BLE001
+            last = err
+            if i < tries - 1:
+                time.sleep(2 * (i + 1))
+    raise RuntimeError(f"{tries} tries failed: {last}")
+
+
 def wikipedia_editions():
-    """The dbnames of every open Wikipedia language edition, from the API."""
-    with urllib.request.urlopen(
-            urllib.request.Request(SITEMATRIX, headers=UA), timeout=60) as r:
-        matrix = json.load(r)["sitematrix"]
+    """The dbnames of every open Wikipedia language edition, from the API.
+
+    Retried like everything else. This was the one call that was not, so a
+    single 429 on the very first request killed the whole crawl before it read
+    one event - measured, with the identical URL answering 200 a second later."""
+    try:
+        matrix = get(SITEMATRIX)["sitematrix"]
+    except RuntimeError as err:
+        raise SystemExit(f"sitematrix unreachable: {err}")
     out = set()
     for key, group in matrix.items():
         if key in ("count", "specials"):
@@ -64,13 +106,10 @@ def batch(qids):
     params = {"action": "wbgetentities", "ids": "|".join(qids),
               "props": "sitelinks", "format": "json", "formatversion": "2"}
     url = API + "?" + urllib.parse.urlencode(params)
-    for i in range(4):
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
-                return json.load(r).get("entities", {})
-        except Exception:                             # noqa: BLE001
-            time.sleep(2 * (i + 1))
-    return {}
+    try:
+        return get(url).get("entities", {})
+    except RuntimeError:
+        return {}
 
 
 def main():
@@ -105,6 +144,41 @@ def main():
     with cf.ThreadPoolExecutor(max_workers=4) as ex:
         list(ex.map(work, chunks))
 
+    # A second, patient pass over whatever the API never answered for.
+    #
+    # This used to be left alone: unresolved events kept their previous `sl` and
+    # `m` and the run printed a warning. That is not a safe fallback, and the
+    # reason is two lines further down - `doc["langs"]` is rewritten in the same
+    # write. The mask is a set of BIT POSITIONS into that vocabulary, so the
+    # moment the top-32 ordering shifts by one place, every kept mask starts
+    # meaning a different set of languages. A partially-refreshed corpus is not
+    # a slightly stale corpus; it is a corpus that is confidently wrong about
+    # which editions carry 19% of its rows.
+    #
+    # So: retry the stragglers serially, in smaller batches, until they are all
+    # answered or the rounds run out. Serial on purpose - four workers is what
+    # earned the 429s in the first place.
+    for rnd in range(1, 6):
+        missing = [qid for qid in qids if qid not in langs_for]
+        if not missing:
+            break
+        print(f"\n  round {rnd}: {len(missing):,} unresolved, retrying serially", flush=True)
+        for i in range(0, len(missing), 20):
+            ents = batch(missing[i:i + 20])
+            for qid, ent in ents.items():
+                sl = ent.get("sitelinks") or {}
+                langs_for[qid] = sorted(k[:-4] for k in sl if k in EDITIONS)
+            time.sleep(0.4)
+
+    missing = [qid for qid in qids if qid not in langs_for]
+    if missing:
+        raise SystemExit(
+            f"\n{len(missing):,} of {len(qids):,} events unresolved after 5 retry rounds.\n"
+            "Refusing to write a partial corpus: the top-32 vocabulary is recomputed in\n"
+            "the same pass, and a kept mask is bit positions into it, so rows that missed\n"
+            "this run would be read against a vocabulary they were never built for.\n"
+            "src/events.json is unchanged. Re-run when the API is answering.")
+
     # The 32 editions that appear most often here. A fixed vocabulary, so the
     # mask means the same thing in every event and the client needs no lookup.
     freq = collections.Counter(l for ls in langs_for.values() for l in ls)
@@ -112,18 +186,8 @@ def main():
     idx = {l: i for i, l in enumerate(top)}
     print(f"\ntop 32 editions: {','.join(top)}")
 
-    missing = 0
     for e in events:
-        ls = langs_for.get(e["q"])
-        if ls is None:
-            # The API never answered for this one. Zeroing the mask while
-            # leaving the old `sl` in place makes the page state a
-            # contradiction - "remembered in 40 editions", every one of the 32
-            # codes struck through, "No English article" - so keep whatever a
-            # previous good run recorded and let the count below report it.
-            missing += 1
-            e.setdefault("m", 0)
-            continue
+        ls = langs_for[e["q"]]           # every one of them, or we exited above
         mask = 0
         for l in ls:
             if l in idx:
@@ -132,18 +196,22 @@ def main():
         e["sl"] = len(ls)                # authoritative count from the sitelinks themselves
 
     doc["langs"] = top
-    json.dump(doc, open(PATH, "w", encoding="utf-8"),
-              separators=(",", ":"), ensure_ascii=False)
+    # Written beside and renamed over. A five-megabyte json.dump that dies part
+    # way through - a full disk, a Ctrl-C - leaves a truncated events.json that
+    # every tool downstream reads as a parse error, and the only copy of the
+    # corpus is in git. os.replace is atomic on the same filesystem.
+    tmp = PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, separators=(",", ":"), ensure_ascii=False)
+    os.replace(tmp, PATH)
 
     cov = collections.Counter()
     for e in events:
         for l in top:
             if e["m"] & (1 << idx[l]):
                 cov[l] += 1
-    print(f"\nrewrote {PATH}  ({os.path.getsize(PATH):,} bytes)   unresolved: {missing}")
-    if missing:
-        print(f"  WARNING: {missing:,} events kept their previous coverage; "
-              f"re-run to resolve them.")
+    print(f"\nrewrote {PATH}  ({os.path.getsize(PATH):,} bytes)   "
+          f"all {len(events):,} events resolved from live sitelinks")
     print("coverage by edition (of %d events):" % len(events))
     for l, n in cov.most_common(12):
         print(f"  {l:6} {n:>5}  {100*n//len(events):>3}%  {'#' * (n * 40 // len(events))}")

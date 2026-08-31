@@ -433,7 +433,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 
   <main class="stage" id="stage">
     <canvas id="globe" tabindex="0" role="application"
-            aria-label="Globe of dated human events. Arrow keys rotate, plus and minus zoom, Escape clears the selection."></canvas>
+            aria-label="Globe of dated human events. Arrow keys rotate, plus and minus zoom. Enter selects the nearest event to the centre, shift with an arrow key moves to the next event in that direction, Escape clears the selection."></canvas>
 
     <div class="stage-tl">
       <div class="headline">Remembered in <b id="hd-cov">1</b>+ languages &middot;
@@ -1517,6 +1517,66 @@ function hitTest(mx, my) {
     return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k], g: HK[k] };
   }
   return null;
+}
+
+/* One hit target, in the shape hitTest returns - so the keyboard and the mouse
+   hand the same thing to setSelection and neither has to know how the other got
+   there. */
+function targetAt(k) {
+  if (k < 0 || k >= HN) return null;
+  return { id: EV[HI[k]].q, i: HI[k], x: HX[k], y: HY[k], n: HC[k], g: HK[k] };
+}
+
+/* The keyboard's route onto the globe.
+ *
+ * The canvas is role="application" tabindex="0" and advertises "arrow keys
+ * rotate, plus and minus zoom, Escape clears the selection". Every one of those
+ * worked; between them they let a keyboard user look at the globe and clear a
+ * selection, and gave no way to MAKE one - the primary action of the site.
+ * Search reaches any mark BY NAME, which is not the same as reaching the mark
+ * you can see, there, on the coast.
+ *
+ * Directional, not a cycle: at the default view there are 2,183 marks, and
+ * stepping through them in draw order is not a route to anything. The cone test
+ * is the standard one - a candidate has to be more in the direction asked for
+ * than across it - and the cost is a perpendicular offset weighted against the
+ * distance, so "up" prefers the mark straight above to one further along the
+ * axis but well off to the side. */
+function nextInDirection(x, y, dx, dy, skip) {
+  let best = -1, bestCost = Infinity;
+  for (let k = 0; k < HN; k++) {
+    if (k === skip) continue;
+    const ax = HX[k] - x, ay = HY[k] - y;
+    const along = ax * dx + ay * dy;
+    if (along <= 1) continue;                       // behind, or on the spot
+    const across = Math.abs(ax * dy - ay * dx);
+    if (across > along) continue;                   // outside a 45-degree cone
+    const cost = along + across * 2;
+    if (cost < bestCost) { bestCost = cost; best = k; }
+  }
+  return best;
+}
+
+/* The mark nearest the middle of the disc - the keyboard's way in, before there
+   is a selection to move from. */
+function nearestToCentre() {
+  let best = -1, bd = Infinity;
+  for (let k = 0; k < HN; k++) {
+    const dx = HX[k] - GCX, dy = HY[k] - GCY;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+
+/* Where a directional step starts from: the selected mark if it is on screen,
+   otherwise the centre of the disc. */
+function targetOfSelection() {
+  if (!S.selection) return -1;
+  const e = BY_Q[S.selection];
+  if (!e) return -1;
+  for (let k = 0; k < HN; k++) if (HI[k] === e.i) return k;
+  return -1;
 }
 
 function drawEvents() {
@@ -3003,17 +3063,54 @@ gcv.addEventListener('wheel', e => {
   setZoom(ZOOMF * (e.deltaY > 0 ? 0.92 : 1.087));
   paintOnInput();
 }, { passive: false });
+/* Select a hit target the same way a click does, tooltip and cluster list and
+   all. The membership snapshot has to be taken before setSelection, because the
+   repaint it triggers overwrites the scratch arrays it reads. */
+function pickTarget(k) {
+  const t = targetAt(k);
+  if (!t) return false;
+  const group = groupMembers(t.g, 12);
+  setSelection(t.id, group);
+  showTip(t);
+  return true;
+}
+
+/* A step to the next mark in one screen direction.
+ *
+ * Shift+Arrow, always - not "arrows change meaning once something is selected".
+ * A modal keyboard on a canvas that also owns the unmodified arrows is a way to
+ * lose people. This costs the old 15-degree coarse rotate, which key repeat
+ * covers, and buys the site the thing it did not have: a spatial selection
+ * without a mouse. */
+const DIRS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+function stepToMark(key) {
+  const [dx, dy] = DIRS[key];
+  const from = targetOfSelection();
+  const x = from >= 0 ? HX[from] : GCX, y = from >= 0 ? HY[from] : GCY;
+  const k = nextInDirection(x, y, dx, dy, from);
+  if (k < 0) return false;
+  return pickTarget(k);
+}
+
 gcv.addEventListener('keydown', e => {
-  const step = e.shiftKey ? 15 : 5;
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
-      e.key === 'ArrowUp' || e.key === 'ArrowDown') dropGroup();
+  if (DIRS[e.key] && e.shiftKey) {
+    if (stepToMark(e.key)) e.preventDefault();
+    return;
+  }
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    if (pickTarget(nearestToCentre())) e.preventDefault();
+    return;
+  }
+  const step = 5;
+  if (DIRS[e.key]) dropGroup();
   if (e.key === 'ArrowLeft') S.rot.lam -= step;
   else if (e.key === 'ArrowRight') S.rot.lam += step;
   else if (e.key === 'ArrowUp') S.rot.phi = Math.min(89, S.rot.phi + step);
   else if (e.key === 'ArrowDown') S.rot.phi = Math.max(-89, S.rot.phi - step);
   else if (e.key === '+' || e.key === '=') setZoom(ZOOMF * 1.12);
   else if (e.key === '-') setZoom(ZOOMF * 0.89);
-  else if (e.key === 'Escape') { setSelection(null); return e.preventDefault(); }
+  else if (e.key === 'Escape') { setSelection(null); clearHover(); return e.preventDefault(); }
   else return;
   needGlobe = true; paintOnInput(); e.preventDefault();
 });

@@ -354,17 +354,54 @@ gcv.addEventListener('wheel', e => {
   setZoom(ZOOMF * (e.deltaY > 0 ? 0.92 : 1.087));
   paintOnInput();
 }, { passive: false });
+/* Select a hit target the same way a click does, tooltip and cluster list and
+   all. The membership snapshot has to be taken before setSelection, because the
+   repaint it triggers overwrites the scratch arrays it reads. */
+function pickTarget(k) {
+  const t = targetAt(k);
+  if (!t) return false;
+  const group = groupMembers(t.g, 12);
+  setSelection(t.id, group);
+  showTip(t);
+  return true;
+}
+
+/* A step to the next mark in one screen direction.
+ *
+ * Shift+Arrow, always - not "arrows change meaning once something is selected".
+ * A modal keyboard on a canvas that also owns the unmodified arrows is a way to
+ * lose people. This costs the old 15-degree coarse rotate, which key repeat
+ * covers, and buys the site the thing it did not have: a spatial selection
+ * without a mouse. */
+const DIRS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+function stepToMark(key) {
+  const [dx, dy] = DIRS[key];
+  const from = targetOfSelection();
+  const x = from >= 0 ? HX[from] : GCX, y = from >= 0 ? HY[from] : GCY;
+  const k = nextInDirection(x, y, dx, dy, from);
+  if (k < 0) return false;
+  return pickTarget(k);
+}
+
 gcv.addEventListener('keydown', e => {
-  const step = e.shiftKey ? 15 : 5;
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
-      e.key === 'ArrowUp' || e.key === 'ArrowDown') dropGroup();
+  if (DIRS[e.key] && e.shiftKey) {
+    if (stepToMark(e.key)) e.preventDefault();
+    return;
+  }
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    if (pickTarget(nearestToCentre())) e.preventDefault();
+    return;
+  }
+  const step = 5;
+  if (DIRS[e.key]) dropGroup();
   if (e.key === 'ArrowLeft') S.rot.lam -= step;
   else if (e.key === 'ArrowRight') S.rot.lam += step;
   else if (e.key === 'ArrowUp') S.rot.phi = Math.min(89, S.rot.phi + step);
   else if (e.key === 'ArrowDown') S.rot.phi = Math.max(-89, S.rot.phi - step);
   else if (e.key === '+' || e.key === '=') setZoom(ZOOMF * 1.12);
   else if (e.key === '-') setZoom(ZOOMF * 0.89);
-  else if (e.key === 'Escape') { setSelection(null); return e.preventDefault(); }
+  else if (e.key === 'Escape') { setSelection(null); clearHover(); return e.preventDefault(); }
   else return;
   needGlobe = true; paintOnInput(); e.preventDefault();
 });
