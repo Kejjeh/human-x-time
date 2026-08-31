@@ -1,5 +1,24 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="description" content="38,242 dated, located events from Wikidata on a globe. Along the bottom, when. Up the right-hand edge, how much of the world remembers it - the number of Wikipedia language editions that carry an article." />
+<!-- og:image has to be absolute; every scraper that matters refuses a relative
+     one. So this file carries a canonical origin, which is a new kind of thing
+     for it to carry and worth saying out loud - it is the published GitHub
+     Pages URL and nothing in the page reads it back.
+     The image is preview.jpg, and it is .jpg because it always was JPEG: the
+     file shipped as preview.png with FF D8 FF at the front, and GitHub Pages
+     sets Content-Type from the extension, so a scraper got JPEG bytes labelled
+     image/png and several validators reject that outright. -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Human × Time" />
+<meta property="og:description" content="38,242 dated, located events from Wikidata. When they happened, and how much of the world remembers them." />
+<meta property="og:url" content="https://kejjeh.github.io/human-x-time/" />
+<meta property="og:image" content="https://kejjeh.github.io/human-x-time/preview.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<!-- Inline, like everything else here: no network, one file. Stripped from
+     artifact.html by build.py, which needs to be told about it - a link is not
+     a meta and the old rule would have leaked this into a host's document. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314100C'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23D9A441' stroke-width='2'/%3E%3Ccircle cx='21.5' cy='11' r='3' fill='%23D9A441'/%3E%3C/svg%3E" />
 <title>Human × Time</title>
 <style>
 /*@FONTS@*/
@@ -305,6 +324,16 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
    on where it was put: near the right edge it wrapped from 174x47 to 93x97.
    Measure-then-place is then always one layout stale, and the clamp used the
    wrong half-width. Anchored at 0 the width is stable and measured once. */
+/* The guided path sits at the foot of the stage, over the globe rather than
+   beside it - the whole point is to watch the controls move while reading why. */
+.tour { position:absolute; left:14px; right:14px; bottom:12px; z-index:22;
+  background:rgba(10,14,22,.9); border:1px solid var(--rule); border-radius:var(--r);
+  padding:10px 12px; display:flex; gap:12px; align-items:flex-end;
+  flex-wrap:wrap; backdrop-filter:blur(3px); }
+.tour-t { margin:0; flex:1 1 260px; font-size:12px; line-height:1.5; color:var(--stage-fg); }
+.tour-t b { color:var(--stage-accent); font-family:var(--font-data); letter-spacing:0; }
+.tour-b { display:flex; gap:6px; align-items:center; flex:none; }
+.tour-n { font-size:10px; color:var(--stage-fg-dim); padding-right:4px; }
 .tip { position:absolute; left:0; top:0; pointer-events:none; z-index:20; padding:6px 9px;
   background:color-mix(in srgb, var(--panel) 94%, transparent); border:1px solid var(--rule);
   border-radius:var(--r); font-size:11.5px; max-width:250px;
@@ -370,6 +399,16 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
    breakpoints would have missed both. */
 @container (max-width: 700px) {
   .stage-tl { top:52px; max-width:calc(100% - 28px); }
+  /* Five buttons do not fit a narrow stage, and a shrink-to-fit row anchored
+     right does not clip - it runs off the LEFT edge, inside .stage's
+     overflow:hidden, where nothing can reach it. So the row spans the stage and
+     scrolls instead. flex-start, not flex-end: content that overflows the start
+     edge of a flex scroll container cannot be scrolled to in Chromium or
+     WebKit, which is the trap that makes this look like it works. */
+  .stage-tr { left:12px; right:12px; overflow-x:auto; justify-content:flex-start;
+    scrollbar-width:none; }
+  .stage-tr::-webkit-scrollbar { display:none; }
+  .stage-tr .iconbtn { white-space:nowrap; flex:none; }
 }
 /* A finger's first instinct on a narrow layout is to swipe up and read on. All
    three canvases took touch-action:none, so that swipe never reached the page:
