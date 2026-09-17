@@ -53,7 +53,7 @@ function queryEvents(A) {
   let m = 0;
   const counts = new Uint32Array(nTh);
   CAT_COUNTS.fill(0);
-  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0;
+  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0, themeDropped = 0;
 
   for (let i = 0; i < NEV; i++) {
     const t = EVT[i];
@@ -75,7 +75,7 @@ function queryEvents(A) {
        one reports zero and the control can never be moved to a different one. */
     const catOK = catIx < 0 || EVC[i] === catIx;
     if (catOK) counts[th]++;
-    if (!THEME_ON[th]) continue;
+    if (!THEME_ON[th]) { themeDropped++; continue; }
     CAT_COUNTS[EVC[i]]++;
     if (!catOK) { catDropped++; continue; }
     out.push(EV[i]);
@@ -85,8 +85,13 @@ function queryEvents(A) {
   const themeCounts = {};
   for (let t = 0; t < nTh; t++) themeCounts[THEMES[t]] = counts[t];
   return { events: out, idx: idx.subarray(0, m), n: m,
+           /* The four drop counts are the gates in the order the walk applies
+              them, and they partition inWindow - n exactly: coverage first,
+              then lens, then theme, then category. The readout under the time
+              axis prints them as such, so a reader can see which control is
+              hiding what rather than one number blamed on three things. */
            themeCounts, catCounts: CAT_COUNTS, inWindow, belowCoverage,
-           lensDropped, catDropped, total: NEV };
+           lensDropped, themeDropped, catDropped, total: NEV };
 }
 
 let QCACHE = null;

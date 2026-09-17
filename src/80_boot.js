@@ -685,9 +685,25 @@ function render(dt) {
     document.getElementById('rd-window').textContent =
       S.win.t1 >= T_MAX * 0.99 ? 'all 75,000 years'
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
+    /* "36,179 hidden by coverage, theme or lens" was one number blamed on
+       three controls, while the query had already counted each gate. Name
+       them: a reader who set a lens and lost most of the globe can see it was
+       the coverage floor that took 35,856 and the lens only 113. Only gates
+       that actually removed something are listed, in the order the query
+       applies them, and the parts sum to the headline by construction. */
     const dropped = F.inWindow - F.events.length;
+    const gates = [
+      [F.belowCoverage, `under ${S.kt} editions`],
+      [F.lensDropped, S.lens ? `${S.lens.startsWith('not:') ? 'on' : 'not on'} ${S.lens.split(':')[1]}.wikipedia` : 'by the lens'],
+      [F.themeDropped, 'in a kind switched off'],
+      [F.catDropped, S.cat ? `outside ${CAT_LABEL[S.cat] || S.cat}` : 'by the category']
+    ].filter(g => g[0] > 0);
+    /* Short on purpose: this shares a line with the presets, and every extra
+       word wraps the bar and takes height from the globe above it. */
     document.getElementById('rd-drop').innerHTML = dropped > 0
-      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme${S.cat ? ', category' : ''} or lens`
+      ? `<b>${dropped.toLocaleString()}</b> hidden` + (gates.length === 1
+          ? `, all <span class="gate">${esc(gates[0][1])}</span>`
+          : ': ' + gates.map(g => `<span class="gate"><b>${g[0].toLocaleString()}</b> ${esc(g[1])}</span>`).join(' · '))
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`

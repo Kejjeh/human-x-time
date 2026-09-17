@@ -1346,6 +1346,39 @@ def run(url, headed, report):
         report.check("the globe stays drawn across every view state",
                      live["minCol"] > 40, f"fewest colours seen: {live['minCol']}")
 
+        # The hidden count under the time axis used to blame one number on
+        # "coverage, theme or lens". The query counts each gate; the readout
+        # must print them, and they must partition the headline exactly.
+        parts = page.evaluate("""() => {
+          location.hash = '#c=40&l=not:en&th=conflict.disaster&ct=cathedral';
+          readHash(); renderLens(); syncControls(); applyZoom(); changed(); renderNow();
+          const F = q();
+          const el = document.getElementById('rd-drop');
+          // one gate prints "N hidden, all <gate>"; several print each with a count
+          const gb = [...el.querySelectorAll('.gate b')];
+          const nums = gb.length ? gb.map(b => +b.textContent.replace(/,/g, ''))
+                     : (el.querySelector('.gate') ? [F.inWindow - F.n] : []);
+          const head = +(el.querySelector('b') || {}).textContent.replace(/,/g, '');
+          const out = { head, nums, text: el.innerText, hidden: F.inWindow - F.n,
+            gates: [F.belowCoverage, F.lensDropped, F.themeDropped, F.catDropped] };
+          location.hash = ''; readHash(); renderLens(); syncControls(); applyZoom(); changed(); renderNow();
+          return out;
+        }""")
+        report.check("the four drop gates partition the hidden count",
+                     sum(parts["gates"]) == parts["hidden"] and parts["head"] == parts["hidden"],
+                     json.dumps(parts["gates"]) + f" = {parts['hidden']}")
+        # Only the gates that removed something are named - at a floor of 40
+        # with en.wikipedia excluded, nothing in Conflict or Disaster survives
+        # to be theme-dropped, so "switched off" must NOT appear there.
+        labels = ["editions", "en.wikipedia", "switched off", "athedral"]
+        named = [l for l, g in zip(labels, parts["gates"]) if g > 0]
+        silent = [l for l, g in zip(labels, parts["gates"]) if g == 0]
+        report.check("the readout names every gate that hid something, with its count",
+                     parts["nums"] == [g for g in parts["gates"] if g > 0]
+                     and all(l in parts["text"] for l in named)
+                     and not any(l in parts["text"] for l in silent),
+                     parts["text"][:140])
+
         # Text drawn over the stage must not follow the theme's ink: the stage
         # gradient is near-black in both themes, and in light mode --chalk-dim
         # measured 2.53:1 against it, on the line explaining the coverage axis.
