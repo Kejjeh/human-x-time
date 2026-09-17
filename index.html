@@ -365,6 +365,7 @@ select.lens { width:100%; background:var(--panel-2); border:1px solid var(--rule
 .chron-bar .rd { font-family:var(--font-data); font-size:11.5px; color:var(--chalk-dim);
   font-variant-numeric:tabular-nums; }
 .chron-bar .rd b { color:var(--amber); font-weight:600; }
+.chron-bar .rd .gate { white-space:nowrap; }   /* wrap between gates, never inside one */
 .presets { display:flex; gap:3px; margin-left:auto; }
 .presets button { font-family:var(--font-display); text-transform:uppercase; letter-spacing:.09em;
   font-size:9.5px; color:var(--chalk-faint); padding:3px 7px; border:1px solid var(--rule);
@@ -884,7 +885,7 @@ function queryEvents(A) {
   let m = 0;
   const counts = new Uint32Array(nTh);
   CAT_COUNTS.fill(0);
-  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0;
+  let inWindow = 0, belowCoverage = 0, lensDropped = 0, catDropped = 0, themeDropped = 0;
 
   for (let i = 0; i < NEV; i++) {
     const t = EVT[i];
@@ -906,7 +907,7 @@ function queryEvents(A) {
        one reports zero and the control can never be moved to a different one. */
     const catOK = catIx < 0 || EVC[i] === catIx;
     if (catOK) counts[th]++;
-    if (!THEME_ON[th]) continue;
+    if (!THEME_ON[th]) { themeDropped++; continue; }
     CAT_COUNTS[EVC[i]]++;
     if (!catOK) { catDropped++; continue; }
     out.push(EV[i]);
@@ -916,8 +917,13 @@ function queryEvents(A) {
   const themeCounts = {};
   for (let t = 0; t < nTh; t++) themeCounts[THEMES[t]] = counts[t];
   return { events: out, idx: idx.subarray(0, m), n: m,
+           /* The four drop counts are the gates in the order the walk applies
+              them, and they partition inWindow - n exactly: coverage first,
+              then lens, then theme, then category. The readout under the time
+              axis prints them as such, so a reader can see which control is
+              hiding what rather than one number blamed on three things. */
            themeCounts, catCounts: CAT_COUNTS, inWindow, belowCoverage,
-           lensDropped, catDropped, total: NEV };
+           lensDropped, themeDropped, catDropped, total: NEV };
 }
 
 let QCACHE = null;
@@ -3625,9 +3631,25 @@ function render(dt) {
     document.getElementById('rd-window').textContent =
       S.win.t1 >= T_MAX * 0.99 ? 'all 75,000 years'
         : `${fmtYbpLabel(S.win.t1)} to ${fmtYbpLabel(S.win.t0)}`;
+    /* "36,179 hidden by coverage, theme or lens" was one number blamed on
+       three controls, while the query had already counted each gate. Name
+       them: a reader who set a lens and lost most of the globe can see it was
+       the coverage floor that took 35,856 and the lens only 113. Only gates
+       that actually removed something are listed, in the order the query
+       applies them, and the parts sum to the headline by construction. */
     const dropped = F.inWindow - F.events.length;
+    const gates = [
+      [F.belowCoverage, `under ${S.kt} editions`],
+      [F.lensDropped, S.lens ? `${S.lens.startsWith('not:') ? 'on' : 'not on'} ${S.lens.split(':')[1]}.wikipedia` : 'by the lens'],
+      [F.themeDropped, 'in a kind switched off'],
+      [F.catDropped, S.cat ? `outside ${CAT_LABEL[S.cat] || S.cat}` : 'by the category']
+    ].filter(g => g[0] > 0);
+    /* Short on purpose: this shares a line with the presets, and every extra
+       word wraps the bar and takes height from the globe above it. */
     document.getElementById('rd-drop').innerHTML = dropped > 0
-      ? `<b>${dropped.toLocaleString()}</b> hidden by coverage, theme${S.cat ? ', category' : ''} or lens`
+      ? `<b>${dropped.toLocaleString()}</b> hidden` + (gates.length === 1
+          ? `, all <span class="gate">${esc(gates[0][1])}</span>`
+          : ': ' + gates.map(g => `<span class="gate"><b>${g[0].toLocaleString()}</b> ${esc(g[1])}</span>`).join(' · '))
       : '';
     document.getElementById('hd-sub').textContent =
       S.lens ? `${F.lensDropped.toLocaleString()} events in this window fail the language filter.`
