@@ -1803,6 +1803,29 @@ def fine_pointer(url, headed, report):
                 report.check("clearing a selection does not scroll the page",
                              page.evaluate("Math.round(window.scrollY)") == 0,
                              f"scrollY={page.evaluate('Math.round(window.scrollY)')}")
+
+                # ------------------------ every control under a finger is 24px
+                # WCAG 2.5.8: a target is at least 24x24 CSS px unless it is
+                # inline in a sentence or has that much clear space around it.
+                # The theme chips were 23px tall and stacked with no gap, the
+                # category tag on a selected event 20px, and the language codes
+                # - 32 of them, 3px apart, each a link to an edition - 16px.
+                # Measured, not assumed: the boxes the phone actually lays out.
+                page.evaluate("setSelection(EV[0].q)")
+                page.wait_for_timeout(300)
+                small = page.evaluate("""() => {
+                  const sel = '#themes .theme, .dt-head button.tag, .langs a, .langs span.miss, .nearby button, #btn-unpin';
+                  const bad = [];
+                  for (const el of document.querySelectorAll(sel)) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24))
+                      bad.push((el.id || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+                  }
+                  return bad;
+                }""")
+                report.check("every chip, tag and language code is a 24px target under a finger",
+                             small == [], (", ".join(small[:6]) + (" ..." if len(small) > 6 else "")) or "all at least 24x24")
+                page.evaluate("setSelection(null)")
             ctx.close()
         browser.close()
 
