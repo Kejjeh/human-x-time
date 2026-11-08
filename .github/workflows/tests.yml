@@ -1,0 +1,57 @@
+# Run the offline gates on every push to main and every pull request.
+#
+# No network, no secrets. Skipped in CI, on purpose: tools/fetch_*.py
+# (Wikidata and other public APIs; they rewrite committed data).
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, smoke test and offline gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # No requirements file: the tools are standard library, except the smoke
+      # test, which needs Playwright with Chromium (installed below).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Playwright and Chromium (for the smoke test)
+        run: |
+          python -m pip install playwright==1.59.0
+          python -m playwright install --with-deps chromium
+
+      - name: Path checker self-test
+        run: python tools/check_no_local_paths.py --self-test
+
+      - name: Pack events round-trip
+        run: python tools/pack_events.py
+
+      # build.py exits 0 and only prints "skipping smoke test" when Playwright
+      # is missing, so also require that both smoke tests (index.html and
+      # artifact.html) actually ran.
+      - name: Build and smoke test
+        run: |
+          python tools/build.py | tee "$RUNNER_TEMP/build.log"
+          if grep -q "skipping smoke test" "$RUNNER_TEMP/build.log"; then
+            echo "::error::the smoke test did not run"; exit 1
+          fi
+          test "$(grep -c "checks passed" "$RUNNER_TEMP/build.log")" -eq 2
+
+      - name: Built files match the commit
+        run: git diff --exit-code --stat

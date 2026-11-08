@@ -18,6 +18,7 @@ python tools/check_no_local_paths.py --all     # exit 0 = no home-directory path
 python -m http.server 8000                     # optional; human-x-time.html also opens straight off disk
 ```
 
+- CI (`.github/workflows/tests.yml`) runs `--self-test`, `pack_events.py` and `build.py` (both smoke tests) on every push to `main` and every PR, and fails on any diff after the build.
 - The smoke test needs `playwright` with Chromium (installed on this machine). Without it, `build.py` prints "skipping smoke test" and still exits 0, so check that the `124/124` lines actually appear.
 - Set `PYTHONUTF8=1` on Windows: event names carry every script.
 - **Network, not run during verification** (free public APIs, slow, rewrite committed data; owner's call): `tools/fetch_events.py --per-cat 1800` (Wikidata SPARQL, rewrites `src/events.json`), `tools/fetch_languages.py` (rewrites `src/events.json` in place), `tools/fetch_coast.py`, `fetch_fonts.py`, `fetch_texture.py` (each rewrites one `assets/` file).
